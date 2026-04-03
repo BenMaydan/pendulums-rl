@@ -82,6 +82,7 @@ def main():
         "edge_spring_k": 500.0
     }
     
+    ai_mode = False
     if args.model_path:
         model_file = args.model_path
         if os.path.isdir(args.model_path):
@@ -94,6 +95,7 @@ def main():
                 print(f"No .zip models found in {args.model_path}")
                 
         if model_file and os.path.isfile(model_file):
+            ai_mode = True
             print(f"Loading model from {model_file}...")
             model = PPO.load(model_file)
             # Infer n_pendulums from the model's expected observation space
@@ -119,10 +121,10 @@ def main():
     # Initialize the actual Gym Environment
     env = NPendulumEnv(**env_kwargs)
     env.reset()
+    env.set_eval()
     
     ppm = TRACK_WIDTH_PX / env.pole_length
 
-    ai_mode = True
     dragging_cart = False
     mouse_pixel_x = WIDTH // 2
     applied_force = 0.0

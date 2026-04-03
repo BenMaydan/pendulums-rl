@@ -15,14 +15,15 @@ class NPendulumEnv(gym.Env):
                  lengths=None,
                  com_distances=None,
                  inertias=None,
-                 viscous_friction=0.0,
+                 viscous_friction=0.05,
                  target_configs=None,
                  cart_sigma=0.2,
                  config_sigma=0.1,
                  dt=0.02,
                  pole_length=1.0,
                  edge_spring_k=500.0,
-                 edge_spring_damp=10.0):
+                 edge_spring_damp=10.0,
+                 max_g=2.0):
         super(NPendulumEnv, self).__init__()
         
         self.N = n_pendulums
@@ -30,11 +31,16 @@ class NPendulumEnv(gym.Env):
         self.dt = dt
         self.g = 9.81
         
-        # Default physical parameters if none provided
-        self.masses = np.array(masses if masses is not None else [1.0] * self.N, dtype=np.float64)
-        self.lengths = np.array(lengths if lengths is not None else [1.0] * self.N, dtype=np.float64)
-        self.com_distances = np.array(com_distances if com_distances is not None else [0.5] * self.N, dtype=np.float64)
-        self.inertias = np.array(inertias if inertias is not None else [0.1] * self.N, dtype=np.float64)
+        # Default physical parameters for realistic simulation (Uniform rods)
+        m_def = 0.25
+        l_def = 0.5
+        com_def = l_def / 2.0
+        i_def = (1.0 / 12.0) * m_def * (l_def ** 2)
+
+        self.masses = np.array(masses if masses is not None else [m_def] * self.N, dtype=np.float64)
+        self.lengths = np.array(lengths if lengths is not None else [l_def] * self.N, dtype=np.float64)
+        self.com_distances = np.array(com_distances if com_distances is not None else [com_def] * self.N, dtype=np.float64)
+        self.inertias = np.array(inertias if inertias is not None else [i_def] * self.N, dtype=np.float64)
         
         if isinstance(viscous_friction, (int, float)):
             self.viscous_friction = np.full(self.N, viscous_friction, dtype=np.float64)
@@ -50,8 +56,12 @@ class NPendulumEnv(gym.Env):
         self.edge_spring_k = edge_spring_k
         self.edge_spring_damp = edge_spring_damp
         
-        # Action space: Normalized [-1.0, 1.0]. Will be scaled up to real physical force inside step()
-        self.max_force = 100.0
+        # Action space: Normalized [-1.0, 1.0]. Scaled to physical force in step()
+        # Max force calculated from configurable max_g and total mass
+        self.max_g = max_g
+        total_mass = self.cart_mass + np.sum(self.masses)
+        self.max_force = self.max_g * self.g * total_mass
+        
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64)
         
         # Observation space: N angle diffs, N angular velocities, 1 cart position
@@ -63,7 +73,28 @@ class NPendulumEnv(gym.Env):
         self.current_step_count = 0
         self.max_steps = int(10.0 / self.dt)
         self.current_target_config = self.target_configs[0] if self.target_configs else np.zeros(self.N)
+        self.eval_mode = False
         self._precompute_constants()
+
+    def get_env_kwargs(self):
+        """Returns the fully resolved environment configuration for saving."""
+        return {
+            "n_pendulums": self.N,
+            "cart_mass": self.cart_mass,
+            "masses": self.masses.tolist(),
+            "lengths": self.lengths.tolist(),
+            "com_distances": self.com_distances.tolist(),
+            "inertias": self.inertias.tolist(),
+            "viscous_friction": self.viscous_friction.tolist(),
+            "target_configs": [list(cfg) for cfg in self.target_configs],
+            "cart_sigma": self.cart_sigma,
+            "config_sigma": self.config_sigma,
+            "dt": self.dt,
+            "pole_length": self.pole_length,
+            "edge_spring_k": self.edge_spring_k,
+            "edge_spring_damp": self.edge_spring_damp,
+            "max_g": self.max_g
+        }
 
     def get_target_config(self):
         """Returns the current target configuration for the environment."""
@@ -72,6 +103,14 @@ class NPendulumEnv(gym.Env):
     def set_target_config(self, target):
         """Sets the current target configuration."""
         self.current_target_config = target
+
+    def set_eval(self):
+        """Disables step truncation for continuous evaluation/visualization."""
+        self.eval_mode = True
+
+    def set_train(self):
+        """Enables standard step truncation for training."""
+        self.eval_mode = False
 
     def _get_obs(self):
         """Builds the observation: angle diffs, angular velocities, cart x."""
@@ -205,7 +244,7 @@ class NPendulumEnv(gym.Env):
         
         # State no longer terminates out-of-bounds due to spring bounce.
         terminated = False
-        truncated = self.current_step_count >= self.max_steps
+        truncated = False if self.eval_mode else (self.current_step_count >= self.max_steps)
         
         return self._get_obs(), total_reward, terminated, truncated, {}
 

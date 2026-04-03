@@ -72,10 +72,13 @@ def main():
         "target_configs": target_configs,
     }
 
-    env_kwargs_to_save = env_kwargs.copy()
-    env_kwargs_to_save["target_configs"] = [t.tolist() for t in env_kwargs_to_save["target_configs"]]
+    # Initialize a temporary environment to resolve all defaults and dynamic physics constraints
+    temp_env = NPendulumEnv(**env_kwargs)
+    fully_resolved_kwargs = temp_env.get_env_kwargs()
+    temp_env.close()
+
     with open(os.path.join(args.log_dir, "env_config.json"), "w") as f:
-        json.dump(env_kwargs_to_save, f, indent=4)
+        json.dump(fully_resolved_kwargs, f, indent=4)
 
     print(f"Initializing {args.num_envs} parallel environments with {args.n_pendulums} pendulums...")
     
