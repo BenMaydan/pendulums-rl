@@ -2,8 +2,10 @@ import pygame
 import math
 import sys
 import time
+import argparse
 import numpy as np
 
+from stable_baselines3 import PPO
 # Import the custom Gymnasium environment
 from env.n_pendulums_env import NPendulumEnv
 
@@ -57,14 +59,29 @@ def draw_spring(surface, color, start_pos, end_pos, coils=5, width=10):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Visualize N-Pendulum")
+    parser.add_argument("--model_path", type=str, default=None, help="Path to the trained SB3 model (.zip)")
+    parser.add_argument("--n_pendulums", type=int, default=3, help="Number of pendulums")
+    args = parser.parse_args()
+
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("N-Pendulum AI Environment")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 28)
 
+    model = None
+    n_pend = args.n_pendulums
+    if args.model_path:
+        print(f"Loading model from {args.model_path}...")
+        model = PPO.load(args.model_path)
+        # Infer n_pendulums from the model's expected observation space
+        # shape is (2 + 2 * n_pendulums,)
+        n_pend = (model.observation_space.shape[0] - 2) // 2
+        print(f"Inferred n_pendulums = {n_pend} from model")
+
     # Initialize the actual Gym Environment
-    env = NPendulumEnv(n_pendulums=3, viscous_friction=0.05, pole_length=1.0, edge_spring_k=500.0)
+    env = NPendulumEnv(n_pendulums=n_pend, viscous_friction=0.05, pole_length=1.0, edge_spring_k=500.0)
     env.reset()
     
     ppm = TRACK_WIDTH_PX / env.pole_length
@@ -136,8 +153,13 @@ def main():
             applied_force = np.clip(applied_force, env.action_space.low[0], env.action_space.high[0])
             
         elif ai_mode:
-            # Apply an oscillating force as a placeholder for an AI policy
-            applied_force = 40.0 * math.sin(time.time() * 4.0)
+            if model is not None:
+                # Use the trained SB3 policy to predict the action
+                action, _states = model.predict(env.state, deterministic=True)
+                applied_force = float(action[0])
+            else:
+                # Fallback if no model loaded
+                applied_force = 40.0 * math.sin(time.time() * 4.0)
         else:
             applied_force = 0.0
 
