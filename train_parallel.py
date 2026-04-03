@@ -87,7 +87,7 @@ def main():
         save_freq=max(100_000 // args.num_envs, 1),
         save_path=args.log_dir,
         name_prefix=f'ppo_npendulum_{args.n_pendulums}',
-        keep_last=5
+        keep_last=10,
     )
 
     print("Creating PPO model...")

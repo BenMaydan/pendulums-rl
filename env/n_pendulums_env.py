@@ -17,7 +17,6 @@ class NPendulumEnv(gym.Env):
                  inertias=None,
                  viscous_friction=0.0,
                  target_configs=None,
-                 config_tolerance_pct=0.05,
                  cart_sigma=0.2,
                  config_sigma=0.1,
                  dt=0.02,
@@ -44,7 +43,6 @@ class NPendulumEnv(gym.Env):
         
         # Reward parameters
         self.target_configs = target_configs if target_configs is not None else [np.zeros(self.N)]
-        self.config_tolerance = config_tolerance_pct * 2 * np.pi
         self.config_sigma = config_sigma
         self.cart_sigma = cart_sigma
         
@@ -64,7 +62,6 @@ class NPendulumEnv(gym.Env):
         self.state = None
         self.current_step_count = 0
         self.max_steps = int(10.0 / self.dt)
-        self.air_time = 0.0
         self.current_target_config = self.target_configs[0] if self.target_configs else np.zeros(self.N)
         self._precompute_constants()
 
@@ -195,21 +192,16 @@ class NPendulumEnv(gym.Env):
         
         # Calculate angle diff from target
         diff = (theta - self.current_target_config + np.pi) % (2 * np.pi) - np.pi
-        
-        if np.all(np.abs(diff) <= self.config_tolerance):
-            # Target is met
-            self.air_time += 1.0
-            
-            # Rewarded for staying in the center ONLY when joints are within buffer
-            reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2))
-            total_reward = reward_cart + self.air_time
-        else:
-            # Target is not met
-            self.air_time = 0.0
-            
-            # Punished with linear increase for every joint that is off
-            # It increases by how off the angle is from the target (sum of absolute diffs)
-            total_reward = -np.sum(np.abs(diff))
+
+        # Bell curve for how close we are to target angles [0 to 1]
+        reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2))
+
+        # Bell curve for how close the cart is to the center [0 to 1]
+        reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2))
+
+        # Multiply them to require BOTH for maximum reward
+        # This results in a reward that is ALWAYS in [0, 1]
+        total_reward = reward_angle * reward_cart
         
         # State no longer terminates out-of-bounds due to spring bounce.
         terminated = False
@@ -220,7 +212,6 @@ class NPendulumEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.current_step_count = 0
-        self.air_time = 0.0
         
         # Pick a random target configuration every episode
         if len(self.target_configs) > 0:

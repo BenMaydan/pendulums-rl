@@ -122,7 +122,7 @@ def main():
     
     ppm = TRACK_WIDTH_PX / env.pole_length
 
-    ai_mode = False
+    ai_mode = True
     dragging_cart = False
     mouse_pixel_x = WIDTH // 2
     applied_force = 0.0
