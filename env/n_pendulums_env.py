@@ -73,6 +73,7 @@ class NPendulumEnv(gym.Env):
         self.current_step_count = 0
         self.max_steps = int(10.0 / self.dt)
         self.current_target_config = self.target_configs[0] if self.target_configs else np.zeros(self.N)
+        self.current_init_noise = 0.05  # Curriculum learning: starts at 0.05
         self.eval_mode = False
         self._precompute_constants()
 
@@ -111,6 +112,10 @@ class NPendulumEnv(gym.Env):
     def set_train(self):
         """Enables standard step truncation for training."""
         self.eval_mode = False
+
+    def set_init_noise(self, noise):
+        """Updates the initialization noise spread dynamically for curriculum learning."""
+        self.current_init_noise = noise
 
     def _get_obs(self):
         """Builds the observation: angle diffs, angular velocities, cart x."""
@@ -258,7 +263,10 @@ class NPendulumEnv(gym.Env):
             self.current_target_config = self.target_configs[idx]
             
         self.state = np.zeros(2 + 2 * self.N, dtype=np.float64)
-        self.state[1:self.N+1] = self.np_random.uniform(low=-np.pi, high=np.pi, size=(self.N,))
+        
+        noise = self.np_random.uniform(low=-self.current_init_noise, high=self.current_init_noise, size=(self.N,))
+        self.state[1:self.N+1] = (self.current_target_config + noise + np.pi) % (2 * np.pi) - np.pi
+        
         return self._get_obs(), {}
 
     def get_joint_angles(self):

@@ -9,9 +9,35 @@ import json
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback, CallbackList
 
 from env.n_pendulums_env import NPendulumEnv
+
+class CurriculumCallback(BaseCallback):
+    def __init__(self, start_noise: float = 0.05, max_noise: float = np.pi, 
+                 flat_phase_steps: int = 2_000_000, 
+                 ramp_phase_steps: int = 98_000_000, 
+                 verbose: int = 0):
+        super().__init__(verbose)
+        self.start_noise = start_noise
+        self.max_noise = max_noise
+        self.flat_phase_steps = flat_phase_steps
+        self.ramp_phase_steps = ramp_phase_steps
+
+    def _on_step(self) -> bool:
+        ramp_start = self.flat_phase_steps
+        ramp_end = self.flat_phase_steps + self.ramp_phase_steps
+        
+        if self.num_timesteps <= ramp_start:
+            current_noise = self.start_noise
+        elif self.num_timesteps >= ramp_end:
+            current_noise = self.max_noise
+        else:
+            fraction = (self.num_timesteps - ramp_start) / self.ramp_phase_steps
+            current_noise = self.start_noise + fraction * (self.max_noise - self.start_noise)
+            
+        self.training_env.env_method("set_init_noise", current_noise)
+        return True
 
 class KeepLatestCheckpointsCallback(CheckpointCallback):
     def __init__(self, save_freq: int, save_path: str, name_prefix: str = 'rl_model', keep_last: int = 5, verbose: int = 0):
@@ -92,6 +118,13 @@ def main():
         name_prefix=f'ppo_npendulum_{args.n_pendulums}',
         keep_last=10,
     )
+    
+    curriculum_callback = CurriculumCallback(
+        flat_phase_steps=2_000_000,
+        ramp_phase_steps=98_000_000
+    )
+    
+    callback_list = CallbackList([checkpoint_callback, curriculum_callback])
 
     print("Creating PPO model...")
     # Initialize the PPO agent. The algorithm can be changed to SAC, TD3, etc.
@@ -104,7 +137,7 @@ def main():
 
     print("Starting training...")
     try:
-        model.learn(total_timesteps=args.total_timesteps, callback=checkpoint_callback)
+        model.learn(total_timesteps=args.total_timesteps, callback=callback_list)
     except KeyboardInterrupt:
         print("Training interrupted by user. Saving final model...")
     finally:

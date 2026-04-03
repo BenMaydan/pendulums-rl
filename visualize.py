@@ -121,7 +121,9 @@ def main():
     # Initialize the actual Gym Environment
     env = NPendulumEnv(**env_kwargs)
     env.reset()
-    env.set_eval()
+
+    if not ai_mode:
+        env.set_eval()
     
     ppm = TRACK_WIDTH_PX / env.pole_length
 
