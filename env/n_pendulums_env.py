@@ -219,7 +219,7 @@ class NPendulumEnv(gym.Env):
             self.current_target_config = self.target_configs[idx]
             
         self.state = np.zeros(2 + 2 * self.N, dtype=np.float64)
-        self.state[1:self.N+1] = self.np_random.uniform(low=-0.05, high=0.05, size=(self.N,))
+        self.state[1:self.N+1] = self.np_random.uniform(low=-np.pi, high=np.pi, size=(self.N,))
         return self._get_obs(), {}
 
     def get_joint_angles(self):
