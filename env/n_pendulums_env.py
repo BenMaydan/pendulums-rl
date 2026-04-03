@@ -52,8 +52,9 @@ class NPendulumEnv(gym.Env):
         self.edge_spring_k = edge_spring_k
         self.edge_spring_damp = edge_spring_damp
         
-        # Action space: Continuous external force applied to the cart via a motor
-        self.action_space = spaces.Box(low=-100.0, high=100.0, shape=(1,), dtype=np.float64)
+        # Action space: Normalized [-1.0, 1.0]. Will be scaled up to real physical force inside step()
+        self.max_force = 100.0
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64)
         
         # Observation space: N angle diffs, N angular velocities, 1 cart position
         # Shape is (2 * self.N + 1,)
@@ -176,7 +177,9 @@ class NPendulumEnv(gym.Env):
 
     def step(self, action):
         """Applies the motor force, integrates physics, and calculates rewards."""
-        force = np.clip(action, self.action_space.low, self.action_space.high)[0]
+        # Scale the normalized action [-1.0, 1.0] mathematically up to physical forces
+        normalized_action = np.clip(action, self.action_space.low, self.action_space.high)[0]
+        force = normalized_action * self.max_force
         
         # Apply RK4 integration
         self.state = self._rk4_step(self.state, force)

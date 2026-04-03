@@ -149,14 +149,15 @@ def main():
             
             applied_force = kp * (target_physical_x - cart_x) - kd * cart_v
             
-            # Clip force to the environment's action space limits
-            applied_force = np.clip(applied_force, env.action_space.low[0], env.action_space.high[0])
+            # Clip physical force bounds, but NOT action spaces here
+            applied_force = np.clip(applied_force, -env.max_force, env.max_force)
             
         elif ai_mode:
             if model is not None:
                 # Use the trained SB3 policy to predict the action
                 action, _states = model.predict(env._get_obs(), deterministic=True)
-                applied_force = float(action[0])
+                # Output from SB3 is now in normalized units [-1.0, 1.0], scale to physical representation for visuals
+                applied_force = float(action[0]) * env.max_force
             else:
                 # Fallback if no model loaded
                 applied_force = 40.0 * math.sin(time.time() * 4.0)
@@ -164,11 +165,15 @@ def main():
             applied_force = 0.0
 
         # Step the actual environment
-        action = np.array([applied_force], dtype=np.float32)
-        _, _, terminated, _, _ = env.step(action)
+        # Mathematically re-compress action to [-1.0, 1.0] expected by our normalized environments
+        normalized_action_step = applied_force / env.max_force
+        action = np.array([normalized_action_step], dtype=np.float32)
+        
+        # Capture the extra truncated param manually if we want Visualizer to bounce bounds like train process
+        _, _, terminated, truncated, _ = env.step(action)
 
         # Automatically reset if it goes fundamentally off rails (should rarely happen now with springs)
-        if terminated:
+        if terminated or truncated:
             env.reset()
             dragging_cart = False
 
