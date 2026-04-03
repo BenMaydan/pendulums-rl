@@ -3,6 +3,8 @@ import argparse
 import itertools
 import numpy as np
 import gymnasium as gym
+import glob
+import json
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -10,6 +12,24 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import CheckpointCallback
 
 from env.n_pendulums_env import NPendulumEnv
+
+class KeepLatestCheckpointsCallback(CheckpointCallback):
+    def __init__(self, save_freq: int, save_path: str, name_prefix: str = 'rl_model', keep_last: int = 5, verbose: int = 0):
+        super().__init__(save_freq=save_freq, save_path=save_path, name_prefix=name_prefix, verbose=verbose)
+        self.keep_last = keep_last
+
+    def _on_step(self) -> bool:
+        continue_training = super()._on_step()
+        if self.n_calls % self.save_freq == 0:
+            search_pattern = os.path.join(self.save_path, f"{self.name_prefix}_*_steps.zip")
+            checkpoint_files = glob.glob(search_pattern)
+            checkpoint_files.sort(key=os.path.getmtime)
+            while len(checkpoint_files) > self.keep_last:
+                try:
+                    os.remove(checkpoint_files.pop(0))
+                except OSError:
+                    pass
+        return continue_training
 
 def make_env(rank, seed=0, **env_kwargs):
     """
@@ -52,16 +72,22 @@ def main():
         "target_configs": target_configs,
     }
 
+    env_kwargs_to_save = env_kwargs.copy()
+    env_kwargs_to_save["target_configs"] = [t.tolist() for t in env_kwargs_to_save["target_configs"]]
+    with open(os.path.join(args.log_dir, "env_config.json"), "w") as f:
+        json.dump(env_kwargs_to_save, f, indent=4)
+
     print(f"Initializing {args.num_envs} parallel environments with {args.n_pendulums} pendulums...")
     
     # SubprocVecEnv runs each environment in a separate process
     vec_env = SubprocVecEnv([make_env(i, **env_kwargs) for i in range(args.num_envs)])
     
     # Save checkpoints periodically
-    checkpoint_callback = CheckpointCallback(
+    checkpoint_callback = KeepLatestCheckpointsCallback(
         save_freq=max(100_000 // args.num_envs, 1),
         save_path=args.log_dir,
-        name_prefix=f'ppo_npendulum_{args.n_pendulums}'
+        name_prefix=f'ppo_npendulum_{args.n_pendulums}',
+        keep_last=5
     )
 
     print("Creating PPO model...")

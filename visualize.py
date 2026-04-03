@@ -4,6 +4,9 @@ import sys
 import time
 import argparse
 import numpy as np
+import os
+import glob
+import json
 
 from stable_baselines3 import PPO
 # Import the custom Gymnasium environment
@@ -60,7 +63,7 @@ def draw_spring(surface, color, start_pos, end_pos, coils=5, width=10):
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize N-Pendulum")
-    parser.add_argument("--model_path", type=str, default=None, help="Path to the trained SB3 model (.zip)")
+    parser.add_argument("--model_path", type=str, default="./logs/", help="Path to the trained SB3 model (.zip) or directory")
     parser.add_argument("--n_pendulums", type=int, default=3, help="Number of pendulums")
     args = parser.parse_args()
 
@@ -72,16 +75,49 @@ def main():
 
     model = None
     n_pend = args.n_pendulums
+    env_kwargs = {
+        "n_pendulums": n_pend,
+        "viscous_friction": 0.05,
+        "pole_length": 1.0,
+        "edge_spring_k": 500.0
+    }
+    
     if args.model_path:
-        print(f"Loading model from {args.model_path}...")
-        model = PPO.load(args.model_path)
-        # Infer n_pendulums from the model's expected observation space
-        # shape is (2 * n_pendulums + 1,)
-        n_pend = (model.observation_space.shape[0] - 1) // 2
-        print(f"Inferred n_pendulums = {n_pend} from model")
+        model_file = args.model_path
+        if os.path.isdir(args.model_path):
+            zip_files = glob.glob(os.path.join(args.model_path, "*.zip"))
+            if zip_files:
+                model_file = max(zip_files, key=os.path.getmtime)
+                print(f"Found latest model in directory: {model_file}")
+            else:
+                model_file = None
+                print(f"No .zip models found in {args.model_path}")
+                
+        if model_file and os.path.isfile(model_file):
+            print(f"Loading model from {model_file}...")
+            model = PPO.load(model_file)
+            # Infer n_pendulums from the model's expected observation space
+            # shape is (2 * n_pendulums + 1,)
+            n_pend = (model.observation_space.shape[0] - 1) // 2
+            print(f"Inferred n_pendulums = {n_pend} from model")
+            
+            # Check for env_config.json in the same directory
+            model_dir = os.path.dirname(os.path.abspath(model_file))
+            config_path = os.path.join(model_dir, "env_config.json")
+            if os.path.exists(config_path):
+                print(f"Loading environment config from {config_path}...")
+                with open(config_path, "r") as f:
+                    loaded_config = json.load(f)
+                    env_kwargs.update(loaded_config)
+                    if "target_configs" in env_kwargs:
+                        env_kwargs["target_configs"] = [np.array(t) for t in env_kwargs["target_configs"]]
+                    if "n_pendulums" in env_kwargs:
+                        n_pend = env_kwargs["n_pendulums"]
+            else:
+                env_kwargs["n_pendulums"] = n_pend
 
     # Initialize the actual Gym Environment
-    env = NPendulumEnv(n_pendulums=n_pend, viscous_friction=0.05, pole_length=1.0, edge_spring_k=500.0)
+    env = NPendulumEnv(**env_kwargs)
     env.reset()
     
     ppm = TRACK_WIDTH_PX / env.pole_length
