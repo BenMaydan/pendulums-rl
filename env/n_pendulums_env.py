@@ -55,12 +55,39 @@ class NPendulumEnv(gym.Env):
         # Action space: Continuous external force applied to the cart via a motor
         self.action_space = spaces.Box(low=-100.0, high=100.0, shape=(1,), dtype=np.float64)
         
-        # Observation space: cart position, N angles, cart velocity, N angular velocities
-        high = np.inf * np.ones(2 + 2 * self.N, dtype=np.float64)
+        # Observation space: N angle diffs, N angular velocities, 1 cart position
+        # Shape is (2 * self.N + 1,)
+        high = np.inf * np.ones(2 * self.N + 1, dtype=np.float64)
         self.observation_space = spaces.Box(low=-high, high=high, dtype=np.float64)
         
         self.state = None
+        self.current_step_count = 0
+        self.max_steps = int(10.0 / self.dt)
+        self.air_time = 0.0
+        self.current_target_config = self.target_configs[0] if self.target_configs else np.zeros(self.N)
         self._precompute_constants()
+
+    def get_target_config(self):
+        """Returns the current target configuration for the environment."""
+        return self.current_target_config
+
+    def set_target_config(self, target):
+        """Sets the current target configuration."""
+        self.current_target_config = target
+
+    def _get_obs(self):
+        """Builds the observation: angle diffs, angular velocities, cart x."""
+        if self.state is None:
+            return np.zeros(2 * self.N + 1, dtype=np.float64)
+            
+        x = self.state[0]
+        theta = self.state[1:self.N+1]
+        theta_dot = self.state[self.N+2:]
+        
+        # Calculate angle difference from the target config (closest angle)
+        angle_diff = (theta - self.current_target_config + np.pi) % (2 * np.pi) - np.pi
+        
+        return np.concatenate((angle_diff, theta_dot, [x]))
 
     def _precompute_constants(self):
         """Precomputes mass distribution matrices for the RK4 integration."""
@@ -157,34 +184,49 @@ class NPendulumEnv(gym.Env):
         # Check for numerical instability (NaN, Inf, or extremely large values)
         if not np.all(np.isfinite(self.state)) or np.any(np.abs(self.state) > 1e6):
             self.state = np.zeros_like(self.state)
-            return self.state, 0.0, True, False, {"error": "numerical instability"}
+            return self._get_obs(), 0.0, True, False, {"error": "numerical instability"}
         
+        self.current_step_count += 1
         x = self.state[0]
         theta = self.state[1:self.N+1]
         
-        # --- Reward 1: Configuration Reward ---
-        reward_config = 0.0
-        for target in self.target_configs:
-            diff = (theta - target + np.pi) % (2 * np.pi) - np.pi
-            if np.all(np.abs(diff) <= self.config_tolerance):
-                r = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2))
-                reward_config = max(reward_config, r)
-                
-        # --- Reward 2: Cart Position Reward ---
-        reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2))
+        # Calculate angle diff from target
+        diff = (theta - self.current_target_config + np.pi) % (2 * np.pi) - np.pi
         
-        total_reward = reward_config + reward_cart
+        if np.all(np.abs(diff) <= self.config_tolerance):
+            # Target is met
+            self.air_time += 1.0
+            
+            # Rewarded for staying in the center ONLY when joints are within buffer
+            reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2))
+            total_reward = reward_cart + self.air_time
+        else:
+            # Target is not met
+            self.air_time = 0.0
+            
+            # Punished with linear increase for every joint that is off
+            # It increases by how off the angle is from the target (sum of absolute diffs)
+            total_reward = -np.sum(np.abs(diff))
         
         # State no longer terminates out-of-bounds due to spring bounce.
         terminated = False
+        truncated = self.current_step_count >= self.max_steps
         
-        return self.state, total_reward, terminated, False, {}
+        return self._get_obs(), total_reward, terminated, truncated, {}
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+        self.current_step_count = 0
+        self.air_time = 0.0
+        
+        # Pick a random target configuration every episode
+        if len(self.target_configs) > 0:
+            idx = self.np_random.integers(0, len(self.target_configs))
+            self.current_target_config = self.target_configs[idx]
+            
         self.state = np.zeros(2 + 2 * self.N, dtype=np.float64)
         self.state[1:self.N+1] = self.np_random.uniform(low=-0.05, high=0.05, size=(self.N,))
-        return self.state, {}
+        return self._get_obs(), {}
 
     def get_joint_angles(self):
         """Returns absolute angles for rendering."""

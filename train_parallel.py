@@ -30,7 +30,7 @@ def make_env(rank, seed=0, **env_kwargs):
 def main():
     parser = argparse.ArgumentParser(description="Parallel training for N-Pendulum Environment")
     parser.add_argument("--num_envs", type=int, default=8, help="Number of parallel environments to run")
-    parser.add_argument("--total_timesteps", type=int, default=20_000_000, help="Total training timesteps")
+    parser.add_argument("--total_timesteps", type=int, default=200_000_000, help="Total training timesteps")
     parser.add_argument("--n_pendulums", type=int, default=2, help="Number of pendulums in the environment")
     parser.add_argument("--log_dir", type=str, default="./logs/", help="Directory to save logs and checkpoints")
     args = parser.parse_args()
@@ -40,7 +40,8 @@ def main():
     # Generate all target configurations (0.0 = UP, np.pi = DOWN)
     # Include all combinations except where all pendulums are pointing down
     all_configs = list(itertools.product([0.0, np.pi], repeat=args.n_pendulums))
-    target_configs = [np.array(config) for config in all_configs if not all(c == np.pi for c in config)]
+    # target_configs = [np.array(config) for config in all_configs if not all(c == np.pi for c in config)]
+    target_configs = [np.array(config) for config in all_configs if all(c == 0 for c in config)]
 
     # Define environment parameters
     env_kwargs = {

@@ -76,8 +76,8 @@ def main():
         print(f"Loading model from {args.model_path}...")
         model = PPO.load(args.model_path)
         # Infer n_pendulums from the model's expected observation space
-        # shape is (2 + 2 * n_pendulums,)
-        n_pend = (model.observation_space.shape[0] - 2) // 2
+        # shape is (2 * n_pendulums + 1,)
+        n_pend = (model.observation_space.shape[0] - 1) // 2
         print(f"Inferred n_pendulums = {n_pend} from model")
 
     # Initialize the actual Gym Environment
@@ -155,7 +155,7 @@ def main():
         elif ai_mode:
             if model is not None:
                 # Use the trained SB3 policy to predict the action
-                action, _states = model.predict(env.state, deterministic=True)
+                action, _states = model.predict(env._get_obs(), deterministic=True)
                 applied_force = float(action[0])
             else:
                 # Fallback if no model loaded
