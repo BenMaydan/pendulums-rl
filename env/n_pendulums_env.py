@@ -18,13 +18,14 @@ class NPendulumEnv(gym.Env):
                  viscous_friction=0.05,
                  target_configs=None,
                  cart_sigma=0.48768,
-                 config_sigma=0.1,
+                 config_sigma=1.0,
+                 config_cos_weight=0.3,
+                 vel_sigma=1.5,
                  dt=0.02,
                  pole_length=2.4384,
                  edge_spring_k=500.0,
                  edge_spring_damp=10.0,
                  max_g=2.0,
-                 vel_sigma=2.0,
                  reward_weight_angle=0.6,
                  reward_weight_vel=0.3,
                  reward_weight_cart=0.1,
@@ -55,6 +56,7 @@ class NPendulumEnv(gym.Env):
         # Reward parameters
         self.target_configs = target_configs if target_configs is not None else [np.zeros(self.N)]
         self.config_sigma = config_sigma
+        self.config_cos_weight = config_cos_weight
         self.cart_sigma = cart_sigma
         
         self.pole_length = pole_length
@@ -104,12 +106,13 @@ class NPendulumEnv(gym.Env):
             "target_configs": [list(cfg) for cfg in self.target_configs],
             "cart_sigma": self.cart_sigma,
             "config_sigma": self.config_sigma,
+            "config_cos_weight": self.config_cos_weight,
+            "vel_sigma": self.vel_sigma,
             "dt": self.dt,
             "pole_length": self.pole_length,
             "edge_spring_k": self.edge_spring_k,
             "edge_spring_damp": self.edge_spring_damp,
             "max_g": self.max_g,
-            "vel_sigma": self.vel_sigma
         }
 
     def get_target_config(self):
@@ -263,9 +266,9 @@ class NPendulumEnv(gym.Env):
         # Calculate angle diff from target
         diff = (theta - self.current_target_config + np.pi) % (2 * np.pi) - np.pi
 
-        gauss_reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2)) # Bell curve for how close we are to target angles [0 to 1]
-        cos_reward_angle = np.mean((1.0 + np.cos(diff)) / 2.0)                     # Continuous cosine reward to provide a gradient everywhere for swing-up
-        reward_angle = 0.5 * cos_reward_angle + 0.5 * gauss_reward_angle           # Hybrid alpha approach: 50% global guidance, 50% lock-in precision
+        gauss_reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2))                                   # Bell curve for how close we are to target angles [0 to 1]
+        cos_reward_angle = np.mean((1.0 + np.cos(diff)) / 2.0)                                                       # Continuous cosine reward to provide a gradient everywhere for swing-up
+        reward_angle = self.config_cos_weight * cos_reward_angle + (1 - self.config_cos_weight) * gauss_reward_angle # Hybrid alpha approach: 50% global guidance, 50% lock-in precision
 
         reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2)) # Bell curve for how close the cart is to the center [0 to 1]
 
