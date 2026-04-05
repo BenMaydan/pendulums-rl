@@ -12,6 +12,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback, CallbackList
 
 from env.n_pendulums_env import NPendulumEnv
+from env.physics_utils import compute_max_viscous_friction
 
 class CurriculumCallback(BaseCallback):
     def __init__(self, start_noise: float = 0.05, max_noise: float = np.pi, 
@@ -108,6 +109,11 @@ def main():
         "target_configs": target_configs,
         "early_termination_allowed": True,
     }
+
+    # Calculate your starting viscosity based on zeta = 0.45 (highly stable, but controllable)
+    max_viscosity = compute_max_viscous_friction(zeta=0.45, env_kwargs=env_kwargs)
+    print(f"Computed Curriculum Starting Friction: {max_viscosity:.4f}")
+    # env_kwargs["viscous_friction"] = max_viscosity
 
     # Initialize a temporary environment to resolve all defaults and dynamic physics constraints
     temp_env = NPendulumEnv(**env_kwargs)

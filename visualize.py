@@ -63,7 +63,7 @@ def draw_spring(surface, color, start_pos, end_pos, coils=5, width=10):
 def main():
     parser = argparse.ArgumentParser(description="Visualize N-Pendulum")
     parser.add_argument("--model_path", type=str, default="./logs/", help="Path to the trained SB3 model (.zip) or directory")
-    parser.add_argument("--n_pendulums", type=int, default=3, help="Number of pendulums")
+    parser.add_argument("--n_pendulums", type=int, default=2, help="Number of pendulums")
     args = parser.parse_args()
 
     pygame.init()
@@ -77,7 +77,7 @@ def main():
     env_kwargs = {
         "n_pendulums": n_pend,
         "viscous_friction": 0.05,
-        "pole_length": 1.0,
+        "pole_length": 2.5,
         "edge_spring_k": 500.0
     }
     

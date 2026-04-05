@@ -263,11 +263,11 @@ class NPendulumEnv(gym.Env):
         # Calculate angle diff from target
         diff = (theta - self.current_target_config + np.pi) % (2 * np.pi) - np.pi
 
-        # Bell curve for how close we are to target angles [0 to 1]
-        reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2))
+        gauss_reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2)) # Bell curve for how close we are to target angles [0 to 1]
+        cos_reward_angle = np.mean((1.0 + np.cos(diff)) / 2.0)                     # Continuous cosine reward to provide a gradient everywhere for swing-up
+        reward_angle = 0.5 * cos_reward_angle + 0.5 * gauss_reward_angle           # Hybrid alpha approach: 50% global guidance, 50% lock-in precision
 
-        # Bell curve for how close the cart is to the center [0 to 1]
-        reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2))
+        reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2)) # Bell curve for how close the cart is to the center [0 to 1]
 
         # Bell curve for how close the angular velocities are to 0 [0 to 1]
         reward_vel = np.exp(-np.sum(theta_dot**2) / (2 * self.vel_sigma**2))
