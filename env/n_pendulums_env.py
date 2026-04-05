@@ -17,13 +17,18 @@ class NPendulumEnv(gym.Env):
                  inertias=None,
                  viscous_friction=0.05,
                  target_configs=None,
-                 cart_sigma=0.2,
+                 cart_sigma=0.48768,
                  config_sigma=0.1,
                  dt=0.02,
-                 pole_length=1.0,
+                 pole_length=2.4384,
                  edge_spring_k=500.0,
                  edge_spring_damp=10.0,
-                 max_g=2.0):
+                 max_g=2.0,
+                 vel_sigma=2.0,
+                 reward_weight_angle=0.6,
+                 reward_weight_vel=0.3,
+                 reward_weight_cart=0.1,
+                 early_termination_allowed=False):
         super(NPendulumEnv, self).__init__()
         
         self.N = n_pendulums
@@ -56,6 +61,15 @@ class NPendulumEnv(gym.Env):
         self.edge_spring_k = edge_spring_k
         self.edge_spring_damp = edge_spring_damp
         
+        self.vel_sigma = vel_sigma
+
+        # reward weighting for sum of bell curves
+        self.reward_weight_angle = reward_weight_angle
+        self.reward_weight_vel = reward_weight_vel
+        self.reward_weight_cart = reward_weight_cart
+
+        self.early_termination_allowed = early_termination_allowed
+        
         # Action space: Normalized [-1.0, 1.0]. Scaled to physical force in step()
         # Max force calculated from configurable max_g and total mass
         self.max_g = max_g
@@ -64,9 +78,9 @@ class NPendulumEnv(gym.Env):
         
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64)
         
-        # Observation space: N angle diffs, N angular velocities, 1 cart position
-        # Shape is (2 * self.N + 1,)
-        high = np.inf * np.ones(2 * self.N + 1, dtype=np.float64)
+        # Observation space: current angle (N), target angle (N), cos(theta) (N), sin(theta) (N), angular velocity (N), cart position (1)
+        # Shape is (5 * self.N + 1,)
+        high = np.inf * np.ones(5 * self.N + 1, dtype=np.float64)
         self.observation_space = spaces.Box(low=-high, high=high, dtype=np.float64)
         
         self.state = None
@@ -94,7 +108,8 @@ class NPendulumEnv(gym.Env):
             "pole_length": self.pole_length,
             "edge_spring_k": self.edge_spring_k,
             "edge_spring_damp": self.edge_spring_damp,
-            "max_g": self.max_g
+            "max_g": self.max_g,
+            "vel_sigma": self.vel_sigma
         }
 
     def get_target_config(self):
@@ -117,19 +132,29 @@ class NPendulumEnv(gym.Env):
         """Updates the initialization noise spread dynamically for curriculum learning."""
         self.current_init_noise = noise
 
+    def set_early_termination(self, allowed):
+        """Enable or disable early termination dynamically."""
+        self.early_termination_allowed = allowed
+
     def _get_obs(self):
-        """Builds the observation: angle diffs, angular velocities, cart x."""
+        """Builds the observation."""
         if self.state is None:
-            return np.zeros(2 * self.N + 1, dtype=np.float64)
+            return np.zeros(5 * self.N + 1, dtype=np.float64)
             
         x = self.state[0]
         theta = self.state[1:self.N+1]
         theta_dot = self.state[self.N+2:]
         
-        # Calculate angle difference from the target config (closest angle)
-        angle_diff = (theta - self.current_target_config + np.pi) % (2 * np.pi) - np.pi
+        target = self.current_target_config
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
         
-        return np.concatenate((angle_diff, theta_dot, [x]))
+        # Normalize x position to roughly [-1.0, 1.0] based on the track limits.
+        # This keeps the neural network's input stable regardless of physical track size.
+        limit = max(self.pole_length / 2.0, 0.001)  # Prevent division by zero
+        x_norm = x / limit
+        
+        return np.concatenate((theta, target, cos_theta, sin_theta, theta_dot, [x_norm]))
 
     def _precompute_constants(self):
         """Precomputes mass distribution matrices for the RK4 integration."""
@@ -233,6 +258,7 @@ class NPendulumEnv(gym.Env):
         self.current_step_count += 1
         x = self.state[0]
         theta = self.state[1:self.N+1]
+        theta_dot = self.state[self.N+2:]
         
         # Calculate angle diff from target
         diff = (theta - self.current_target_config + np.pi) % (2 * np.pi) - np.pi
@@ -243,12 +269,19 @@ class NPendulumEnv(gym.Env):
         # Bell curve for how close the cart is to the center [0 to 1]
         reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2))
 
-        # Multiply them to require BOTH for maximum reward
+        # Bell curve for how close the angular velocities are to 0 [0 to 1]
+        reward_vel = np.exp(-np.sum(theta_dot**2) / (2 * self.vel_sigma**2))
+
+        # Multiply them to require ALL for maximum reward
         # This results in a reward that is ALWAYS in [0, 1]
-        total_reward = reward_angle * reward_cart
+        total_reward = (self.reward_weight_angle * reward_angle) + (self.reward_weight_vel * reward_vel) + (self.reward_weight_cart * reward_cart)
         
-        # State no longer terminates out-of-bounds due to spring bounce.
+        # Check early termination if allowed (falling beyond ~90 degrees)
         terminated = False
+        if self.early_termination_allowed and not self.eval_mode:
+            if np.any(np.abs(diff) > np.pi / 2.0):
+                terminated = True
+                
         truncated = False if self.eval_mode else (self.current_step_count >= self.max_steps)
         
         return self._get_obs(), total_reward, terminated, truncated, {}

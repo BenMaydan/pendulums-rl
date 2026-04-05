@@ -17,12 +17,14 @@ class CurriculumCallback(BaseCallback):
     def __init__(self, start_noise: float = 0.05, max_noise: float = np.pi, 
                  flat_phase_steps: int = 2_000_000, 
                  ramp_phase_steps: int = 98_000_000, 
+                 early_term_noise_threshold: float = 0.5,
                  verbose: int = 0):
         super().__init__(verbose)
         self.start_noise = start_noise
         self.max_noise = max_noise
         self.flat_phase_steps = flat_phase_steps
         self.ramp_phase_steps = ramp_phase_steps
+        self.early_term_noise_threshold = early_term_noise_threshold
 
     def _on_step(self) -> bool:
         ramp_start = self.flat_phase_steps
@@ -37,6 +39,13 @@ class CurriculumCallback(BaseCallback):
             current_noise = self.start_noise + fraction * (self.max_noise - self.start_noise)
             
         self.training_env.env_method("set_init_noise", current_noise)
+        
+        # Toggle early termination based on curriculum progression
+        if current_noise >= self.early_term_noise_threshold:
+            self.training_env.env_method("set_early_termination", False)
+        else:
+            self.training_env.env_method("set_early_termination", True)
+            
         return True
 
 class KeepLatestCheckpointsCallback(CheckpointCallback):
@@ -93,9 +102,11 @@ def main():
     env_kwargs = {
         "n_pendulums": args.n_pendulums,
         "viscous_friction": 0.05,
-        "pole_length": 1.0,
+        "pole_length": 2.4384,
+        "cart_sigma": 0.48768,
         "edge_spring_k": 500.0,
         "target_configs": target_configs,
+        "early_termination_allowed": True,
     }
 
     # Initialize a temporary environment to resolve all defaults and dynamic physics constraints
@@ -120,7 +131,7 @@ def main():
     )
     
     curriculum_callback = CurriculumCallback(
-        flat_phase_steps=2_000_000,
+        flat_phase_steps=1_000_000,
         ramp_phase_steps=98_000_000
     )
     

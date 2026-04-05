@@ -16,7 +16,6 @@ from env.n_pendulums_env import NPendulumEnv
 WIDTH, HEIGHT = 800, 600
 # Set FPS to 50 to match the environment's internal dt = 0.02s
 FPS = 50 
-LINK_LENGTH_PX = 60 
 CART_WIDTH, CART_HEIGHT = 80, 40
 CART_Y = HEIGHT // 2
 
@@ -252,11 +251,13 @@ def main():
         angles = env.get_joint_angles()
         current_x, current_y = cart_pixel_x, CART_Y
         
-        for angle in angles:
+        for i, angle in enumerate(angles):
+            link_length_px = env.lengths[i] * ppm
+            
             # Subtracting from Y because PyGame's Y-axis goes down, 
             # and angle=0 is the upright (unstable) position in your physics
-            next_x = current_x + LINK_LENGTH_PX * math.sin(angle)
-            next_y = current_y - LINK_LENGTH_PX * math.cos(angle)
+            next_x = current_x + link_length_px * math.sin(angle)
+            next_y = current_y - link_length_px * math.cos(angle)
             
             pygame.draw.line(screen, BLACK, (current_x, current_y), (next_x, next_y), 4)
             pygame.draw.circle(screen, RED, (int(next_x), int(next_y)), 8)
