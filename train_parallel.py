@@ -12,20 +12,18 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback, CallbackList
 
 from env.n_pendulums_env import NPendulumEnv
-from env.physics_utils import compute_max_viscous_friction
+from env.physics_utils import inches_to_meters, compute_masses, compute_max_viscous_friction
 
 class CurriculumCallback(BaseCallback):
-    def __init__(self, start_noise: float = 0.05, max_noise: float = np.pi, 
-                 flat_phase_steps: int = 2_000_000, 
+    def __init__(self, start_noise: float = 0.05, max_noise: float = np.pi / 4.0, 
+                 flat_phase_steps: int = 1_000_000, 
                  ramp_phase_steps: int = 98_000_000, 
-                 early_term_noise_threshold: float = 0.5,
                  verbose: int = 0):
         super().__init__(verbose)
         self.start_noise = start_noise
         self.max_noise = max_noise
         self.flat_phase_steps = flat_phase_steps
         self.ramp_phase_steps = ramp_phase_steps
-        self.early_term_noise_threshold = early_term_noise_threshold
 
     def _on_step(self) -> bool:
         ramp_start = self.flat_phase_steps
@@ -33,20 +31,39 @@ class CurriculumCallback(BaseCallback):
         
         if self.num_timesteps <= ramp_start:
             current_noise = self.start_noise
+            current_offset = 0.0
+            early_term = True
         elif self.num_timesteps >= ramp_end:
             current_noise = self.max_noise
+            current_offset = np.pi
+            early_term = False
         else:
             fraction = (self.num_timesteps - ramp_start) / self.ramp_phase_steps
-            current_noise = self.start_noise + fraction * (self.max_noise - self.start_noise)
+            current_noise = fraction * self.max_noise
+            current_offset = np.pi
+            early_term = False
             
-        self.training_env.env_method("set_init_noise", current_noise)
+        self.training_env.env_method("set_init_noise", current_noise, current_offset)
+        self.training_env.env_method("set_early_termination", early_term)
+            
+        return True
+
+class TensorboardLoggingCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
         
-        # Toggle early termination based on curriculum progression
-        if current_noise >= self.early_term_noise_threshold:
-            self.training_env.env_method("set_early_termination", False)
-        else:
-            self.training_env.env_method("set_early_termination", True)
-            
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        dones = self.locals.get("dones", [])
+        for info, done in zip(infos, dones):
+            if done:
+                if "episode_max_angle_diff" in info:
+                    self.logger.record("episode_metrics/max_angle_diff", info["episode_max_angle_diff"])
+                    self.logger.record("episode_metrics/max_joint_vel", info["episode_max_joint_vel"])
+                    self.logger.record("episode_metrics/max_cart_pos_perc", info["episode_max_cart_pos_perc"])
+                    if "init_noise" in info:
+                        self.logger.record("episode_metrics/init_noise", info["init_noise"])
+                        self.logger.record("episode_metrics/init_offset", info["init_offset"])
         return True
 
 class KeepLatestCheckpointsCallback(CheckpointCallback):
@@ -120,6 +137,30 @@ def main():
     fully_resolved_kwargs = temp_env.get_env_kwargs()
     temp_env.close()
 
+    # # Compute dynamic kwargs
+    # densities = {
+    #     'aluminum': 2700.0,
+    #     'steel': 7850.0,
+    #     'brass': 8500.0,
+    #     'copper': 8960.0,
+    #     'titanium': 4500.0,
+    #     'tungsten': 19300.0,
+    # }
+    # masses = compute_masses(
+    #     temp_env,
+    #     cross_sectional_area=np.pi * inches_to_meters(1.0) ** 2,
+    #     density=densities['aluminum']
+    # )
+    # print(f"Computed Masses: {masses}")
+    # env_kwargs["masses"] = list(masses)
+
+
+    # # WE COMPUTED DYNAMIC KWARGS, SO WE NEED TO RE-RESOLVE THE KWARGS
+    # temp_env = NPendulumEnv(**env_kwargs)
+    # fully_resolved_kwargs = temp_env.get_env_kwargs()
+    # temp_env.close()
+
+
     with open(os.path.join(args.log_dir, "env_config.json"), "w") as f:
         json.dump(fully_resolved_kwargs, f, indent=4)
 
@@ -141,7 +182,9 @@ def main():
         ramp_phase_steps=98_000_000
     )
     
-    callback_list = CallbackList([checkpoint_callback, curriculum_callback])
+    tensorboard_callback = TensorboardLoggingCallback()
+    
+    callback_list = CallbackList([checkpoint_callback, curriculum_callback, tensorboard_callback])
 
     print("Creating PPO model...")
     # Initialize the PPO agent. The algorithm can be changed to SAC, TD3, etc.

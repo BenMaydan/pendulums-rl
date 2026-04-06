@@ -120,6 +120,7 @@ def main():
     # Initialize the actual Gym Environment
     env = NPendulumEnv(**env_kwargs)
     env.reset()
+    env.set_init_noise(0.05, 0)
 
     if not ai_mode:
         env.set_eval()
@@ -284,6 +285,11 @@ def main():
         force_color = PURPLE if dragging_cart else BLACK 
         force_surf = font.render(force_text, True, force_color)
         screen.blit(force_surf, (20, 50))
+
+        # Draw Episode Metrics
+        metrics_text = f"Max Angle Diff: {env.ep_max_angle_diff:.2f} rad | Max Vel: {env.ep_max_joint_vel:.2f} rad/s | Max Cart: {env.ep_max_cart_pos_perc:.1f}%"
+        metrics_surf = font.render(metrics_text, True, BLACK)
+        screen.blit(metrics_surf, (20, 80))
 
         pygame.display.flip()
 

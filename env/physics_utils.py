@@ -1,6 +1,30 @@
 import numpy as np
 from env.n_pendulums_env import NPendulumEnv
 
+def inches_to_meters(inches: float) -> float:
+    """
+    Converts inches to meters.
+    
+    Args:
+        inches (float): The value in inches.
+        
+    Returns:
+        float: The value in meters.
+    """
+    return inches * 0.0254
+
+def compute_masses(env: NPendulumEnv, cross_sectional_area: float, density: float) -> np.ndarray:
+    """
+    Computes the mass of each pendulum in the environment.
+    
+    Args:
+        env (NPendulumEnv): The N-Pendulum environment.
+        
+    Returns:
+        np.ndarray: An array containing the mass of each pendulum.
+    """
+    return np.array([density * cross_sectional_area * length for length in env.lengths])
+
 def compute_max_viscous_friction(zeta: float, env_kwargs: dict = None) -> float:
     """
     Computes the maximum recommended viscous friction for the N-Pendulum environment 

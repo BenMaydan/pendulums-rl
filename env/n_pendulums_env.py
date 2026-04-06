@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+from numpy.typing import NDArray
 
 class NPendulumEnv(gym.Env):
     """
@@ -11,12 +12,12 @@ class NPendulumEnv(gym.Env):
     def __init__(self, 
                  n_pendulums=2,
                  cart_mass=1.0,
-                 masses=None,
-                 lengths=None,
-                 com_distances=None,
-                 inertias=None,
-                 viscous_friction=0.05,
-                 target_configs=None,
+                 masses:None | int | float | NDArray[np.float64]=None,
+                 lengths:None | int | float | NDArray[np.float64]=None,
+                 com_distances:None | int | float | NDArray[np.float64]=None,
+                 inertias:None | int | float | NDArray[np.float64]=None,
+                 viscous_friction:None | int | float | NDArray[np.float64]=0.05,
+                 target_configs:None | NDArray[np.float64]=None,
                  cart_sigma=0.48768,
                  config_sigma=1.0,
                  config_cos_weight=0.3,
@@ -36,20 +37,43 @@ class NPendulumEnv(gym.Env):
         self.cart_mass = cart_mass
         self.dt = dt
         self.g = 9.81
-        
-        # Default physical parameters for realistic simulation (Uniform rods)
-        m_def = 0.25
-        l_def = 0.5
-        com_def = l_def / 2.0
-        i_def = (1.0 / 12.0) * m_def * (l_def ** 2)
 
-        self.masses = np.array(masses if masses is not None else [m_def] * self.N, dtype=np.float64)
-        self.lengths = np.array(lengths if lengths is not None else [l_def] * self.N, dtype=np.float64)
-        self.com_distances = np.array(com_distances if com_distances is not None else [com_def] * self.N, dtype=np.float64)
-        self.inertias = np.array(inertias if inertias is not None else [i_def] * self.N, dtype=np.float64)
+        m_def = 0.88
+        l_def = 0.5
         
-        if isinstance(viscous_friction, (int, float)):
-            self.viscous_friction = np.full(self.N, viscous_friction, dtype=np.float64)
+        # Dynamic property resolution
+        if masses is None:
+            self.masses = np.full(self.N, m_def, dtype=np.float64)
+        elif isinstance(masses, (int, float)):
+            self.masses = np.full(self.N, float(masses), dtype=np.float64)
+        else:
+            self.masses = np.array(masses, dtype=np.float64)
+            
+        if lengths is None:
+            self.lengths = np.full(self.N, l_def, dtype=np.float64)
+        elif isinstance(lengths, (int, float)):
+            self.lengths = np.full(self.N, float(lengths), dtype=np.float64)
+        else:
+            self.lengths = np.array(lengths, dtype=np.float64)
+            
+        if com_distances is None:
+            self.com_distances = self.lengths / 2.0
+        elif isinstance(com_distances, (int, float)):
+            self.com_distances = np.full(self.N, float(com_distances), dtype=np.float64)
+        else:
+            self.com_distances = np.array(com_distances, dtype=np.float64)
+            
+        if inertias is None:
+            self.inertias = (1.0 / 12.0) * self.masses * (self.lengths ** 2)
+        elif isinstance(inertias, (int, float)):
+            self.inertias = np.full(self.N, float(inertias), dtype=np.float64)
+        else:
+            self.inertias = np.array(inertias, dtype=np.float64)
+        
+        if viscous_friction is None:
+            self.viscous_friction = np.full(self.N, 0.05, dtype=np.float64)
+        elif isinstance(viscous_friction, (int, float)):
+            self.viscous_friction = np.full(self.N, float(viscous_friction), dtype=np.float64)
         else:
             self.viscous_friction = np.array(viscous_friction, dtype=np.float64)
         
@@ -90,7 +114,13 @@ class NPendulumEnv(gym.Env):
         self.max_steps = int(10.0 / self.dt)
         self.current_target_config = self.target_configs[0] if self.target_configs else np.zeros(self.N)
         self.current_init_noise = 0.05  # Curriculum learning: starts at 0.05
+        self.current_init_offset = 0.0
         self.eval_mode = False
+        
+        self.ep_max_angle_diff = 0.0
+        self.ep_max_joint_vel = 0.0
+        self.ep_max_cart_pos_perc = 0.0
+        
         self._precompute_constants()
 
     def get_env_kwargs(self):
@@ -131,9 +161,10 @@ class NPendulumEnv(gym.Env):
         """Enables standard step truncation for training."""
         self.eval_mode = False
 
-    def set_init_noise(self, noise):
+    def set_init_noise(self, noise, offset=0.0):
         """Updates the initialization noise spread dynamically for curriculum learning."""
         self.current_init_noise = noise
+        self.current_init_offset = offset
 
     def set_early_termination(self, allowed):
         """Enable or disable early termination dynamically."""
@@ -157,7 +188,11 @@ class NPendulumEnv(gym.Env):
         limit = max(self.pole_length / 2.0, 0.001)  # Prevent division by zero
         x_norm = x / limit
         
-        return np.concatenate((theta, target, cos_theta, sin_theta, theta_dot, [x_norm]))
+        # Bound angles to [-pi, pi] so continuous spins don't explode the state space
+        theta_bounded = (theta + np.pi) % (2 * np.pi) - np.pi
+        target_bounded = (target + np.pi) % (2 * np.pi) - np.pi
+        
+        return np.concatenate((theta_bounded, target_bounded, cos_theta, sin_theta, theta_dot, [x_norm]))
 
     def _precompute_constants(self):
         """Precomputes mass distribution matrices for the RK4 integration."""
@@ -266,28 +301,55 @@ class NPendulumEnv(gym.Env):
         # Calculate angle diff from target
         diff = (theta - self.current_target_config + np.pi) % (2 * np.pi) - np.pi
 
-        gauss_reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2))                                   # Bell curve for how close we are to target angles [0 to 1]
-        cos_reward_angle = np.mean((1.0 + np.cos(diff)) / 2.0)                                                       # Continuous cosine reward to provide a gradient everywhere for swing-up
-        reward_angle = self.config_cos_weight * cos_reward_angle + (1 - self.config_cos_weight) * gauss_reward_angle # Hybrid alpha approach: 50% global guidance, 50% lock-in precision
+        # Update episode max metrics
+        max_diff = np.max(np.abs(diff))
+        max_vel = np.max(np.abs(theta_dot))
+        cart_limit = max(self.pole_length / 2.0, 0.001)
+        cart_pos_perc = (abs(x) / cart_limit) * 100.0
+
+        self.ep_max_angle_diff = max(self.ep_max_angle_diff, float(max_diff))
+        self.ep_max_joint_vel = max(self.ep_max_joint_vel, float(max_vel))
+        self.ep_max_cart_pos_perc = max(self.ep_max_cart_pos_perc, float(cart_pos_perc))
+
+        gauss_reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2))                                      # Bell curve for how close we are to target angles [0 to 1]
+        # cos_reward_angle = np.mean((1.0 + np.cos(diff)) / 2.0)                                                       # Continuous cosine reward to provide a gradient everywhere for swing-up
+        # reward_angle = self.config_cos_weight * cos_reward_angle + (1 - self.config_cos_weight) * gauss_reward_angle # Hybrid alpha approach: 50% global guidance, 50% lock-in precision
+        linear_reward_angle = np.mean((np.pi - np.abs(diff)) / np.pi)                                                   # Strong linear reward to provide a massive V-shape gradient everywhere for swing-up
+        reward_angle = self.config_cos_weight * linear_reward_angle + (1 - self.config_cos_weight) * gauss_reward_angle # Hybrid alpha approach: 50% global guidance, 50% lock-in precision
 
         reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2)) # Bell curve for how close the cart is to the center [0 to 1]
 
         # Bell curve for how close the angular velocities are to 0 [0 to 1]
         reward_vel = np.exp(-np.sum(theta_dot**2) / (2 * self.vel_sigma**2))
 
-        # Multiply them to require ALL for maximum reward
-        # This results in a reward that is ALWAYS in [0, 1]
-        total_reward = (self.reward_weight_angle * reward_angle) + (self.reward_weight_vel * reward_vel) + (self.reward_weight_cart * reward_cart)
+        # The key to avoiding the "Valley of Death" local minimum at the bottom:
+        # We make the velocity and cart rewards ACT AS MULTIPLIERS to the angle reward.
+        # If the pendulum is at the bottom, `reward_angle` is near 0, so the total reward is near 0.
+        # As it swings to the top, it unlocks bonuses for being still and centered.
+        multiplier = 1.0 + (self.reward_weight_vel * reward_vel) + (self.reward_weight_cart * reward_cart)
+        max_multiplier = 1.0 + self.reward_weight_vel + self.reward_weight_cart
+        
+        total_reward = (reward_angle * multiplier) / max_multiplier
         
         # Check early termination if allowed (falling beyond ~90 degrees)
         terminated = False
         if self.early_termination_allowed and not self.eval_mode:
-            if np.any(np.abs(diff) > np.pi / 2.0):
+            if np.any(np.abs(diff) > np.pi / 4.0):
+                terminated = True
+            if abs(x) > (self.pole_length / 2.0) * 0.8:
                 terminated = True
                 
         truncated = False if self.eval_mode else (self.current_step_count >= self.max_steps)
         
-        return self._get_obs(), total_reward, terminated, truncated, {}
+        info = {
+            "episode_max_angle_diff": self.ep_max_angle_diff,
+            "episode_max_joint_vel": self.ep_max_joint_vel,
+            "episode_max_cart_pos_perc": self.ep_max_cart_pos_perc,
+            "init_noise": self.current_init_noise,
+            "init_offset": self.current_init_offset,
+        }
+        
+        return self._get_obs(), total_reward, terminated, truncated, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -300,8 +362,12 @@ class NPendulumEnv(gym.Env):
             
         self.state = np.zeros(2 + 2 * self.N, dtype=np.float64)
         
+        self.ep_max_angle_diff = 0.0
+        self.ep_max_joint_vel = 0.0
+        self.ep_max_cart_pos_perc = 0.0
+        
         noise = self.np_random.uniform(low=-self.current_init_noise, high=self.current_init_noise, size=(self.N,))
-        self.state[1:self.N+1] = (self.current_target_config + noise + np.pi) % (2 * np.pi) - np.pi
+        self.state[1:self.N+1] = (self.current_target_config + self.current_init_offset + noise + np.pi) % (2 * np.pi) - np.pi
         
         return self._get_obs(), {}
 

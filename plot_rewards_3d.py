@@ -16,10 +16,16 @@ def get_3d_cos(d1, d2, weight):
     cos_2 = (1.0 + np.cos(d2)) / 2.0
     return weight * ((cos_1 + cos_2) / 2.0)
 
+def get_3d_lin(d1, d2, weight):
+    lin_1 = (np.pi - np.abs(d1)) / np.pi
+    lin_2 = (np.pi - np.abs(d2)) / np.pi
+    return weight * ((lin_1 + lin_2) / 2.0)
+
 # === 2. Setup Figure and 3 Subplots ===
 fig = plt.figure(figsize=(18, 6))
 ax_gauss = fig.add_subplot(131, projection='3d')
-ax_cos = fig.add_subplot(132, projection='3d')
+# ax_cos = fig.add_subplot(132, projection='3d')
+ax_lin = fig.add_subplot(132, projection='3d')
 ax_sum = fig.add_subplot(133, projection='3d')
 plt.subplots_adjust(bottom=0.35, wspace=0.1)
 
@@ -28,15 +34,19 @@ init_weight = 0.5
 
 # Calculate initial surfaces
 Z_gauss = get_3d_gauss(D1, D2, init_sigma, init_weight)
-Z_cos = get_3d_cos(D1, D2, init_weight)
-Z_sum = Z_gauss + Z_cos
+# Z_cos = get_3d_cos(D1, D2, init_weight)
+Z_lin = get_3d_lin(D1, D2, init_weight)
+# Z_sum = Z_gauss + Z_cos
+Z_sum = Z_gauss + Z_lin
 
 # Plot surfaces
 surf_gauss = [ax_gauss.plot_surface(D1, D2, Z_gauss, cmap='plasma', edgecolor='none')]
-surf_cos = [ax_cos.plot_surface(D1, D2, Z_cos, cmap='viridis', edgecolor='none')]
+# surf_cos = [ax_cos.plot_surface(D1, D2, Z_cos, cmap='viridis', edgecolor='none')]
+surf_lin = [ax_lin.plot_surface(D1, D2, Z_lin, cmap='viridis', edgecolor='none')]
 surf_sum = [ax_sum.plot_surface(D1, D2, Z_sum, cmap='inferno', edgecolor='none')]
 
-for ax, title in zip([ax_gauss, ax_cos, ax_sum], ["Gaussian Contribution", "Cosine Contribution", "Hybrid Sum"]):
+# for ax, title in zip([ax_gauss, ax_cos, ax_sum], ["Gaussian Contribution", "Cosine Contribution", "Hybrid Sum"]):
+for ax, title in zip([ax_gauss, ax_lin, ax_sum], ["Gaussian Contribution", "Linear Contribution", "Hybrid Sum"]):
     ax.set_title(title)
     ax.set_xlabel("Joint 1 Error (rad)")
     ax.set_ylabel("Joint 2 Error (rad)")
@@ -62,8 +72,10 @@ def update(val):
     surf_gauss[0].remove()
     surf_gauss[0] = ax_gauss.plot_surface(D1, D2, Z_g, cmap='plasma', edgecolor='none')
     
-    surf_cos[0].remove()
-    surf_cos[0] = ax_cos.plot_surface(D1, D2, Z_c, cmap='viridis', edgecolor='none')
+    # surf_cos[0].remove()
+    # surf_cos[0] = ax_cos.plot_surface(D1, D2, Z_c, cmap='viridis', edgecolor='none')
+    surf_lin[0].remove()
+    surf_lin[0] = ax_lin.plot_surface(D1, D2, Z_lin, cmap='viridis', edgecolor='none')
     
     surf_sum[0].remove()
     surf_sum[0] = ax_sum.plot_surface(D1, D2, Z_s, cmap='inferno', edgecolor='none')
@@ -76,11 +88,13 @@ s_weight.on_changed(update)
 # === 4. Custom View Controls for all subplots ===
 azim_angle_val = -60
 elev_angle_val = 30
-for ax in [ax_gauss, ax_cos, ax_sum]:
+# for ax in [ax_gauss, ax_cos, ax_sum]:
+for ax in [ax_gauss, ax_lin, ax_sum]:
     ax.view_init(elev=elev_angle_val, azim=azim_angle_val)
 
 def update_view():
-    for ax in [ax_gauss, ax_cos, ax_sum]:
+    # for ax in [ax_gauss, ax_cos, ax_sum]:
+    for ax in [ax_gauss, ax_lin, ax_sum]:
         ax.view_init(elev=elev_angle_val, azim=azim_angle_val)
     fig.canvas.draw_idle()
 
