@@ -6,7 +6,7 @@ import gymnasium as gym
 import glob
 import json
 
-from stable_baselines3 import PPO
+from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback, CallbackList
@@ -106,7 +106,15 @@ def main():
     parser.add_argument("--total_timesteps", type=int, default=200_000_000, help="Total training timesteps")
     parser.add_argument("--n_pendulums", type=int, default=2, help="Number of pendulums in the environment")
     parser.add_argument("--log_dir", type=str, default="./logs/", help="Directory to save logs and checkpoints")
+    parser.add_argument("--model_type", type=str, default="PPO", choices=["A2C", "DDPG", "DQN", "PPO", "SAC", "TD3"], help="RL Algorithm to use")
     args = parser.parse_args()
+
+    dir_path = os.path.normpath(args.log_dir)
+    parent, base = os.path.split(dir_path)
+    if base:
+        args.log_dir = os.path.join(parent, f"{args.model_type.lower()}_{base}")
+    else:
+        args.log_dir = os.path.join(parent, f"{args.model_type.lower()}")
 
     os.makedirs(args.log_dir, exist_ok=True)
 
@@ -127,6 +135,7 @@ def main():
         "inertias": 0.5,
         "cart_sigma": 0.48768,
         "edge_spring_k": 500.0,
+        "max_cart_vel": 10.0,
         "target_configs": target_configs,
         "early_termination_allowed": True,
     }
@@ -141,7 +150,8 @@ def main():
     fully_resolved_kwargs = temp_env.get_env_kwargs()
     temp_env.close()
 
-    with open(os.path.join(args.log_dir, "env_config.json"), "w") as f:
+    fully_resolved_kwargs["model_type"] = args.model_type
+    with open(os.path.join(args.log_dir, "train_config.json"), "w") as f:
         json.dump(fully_resolved_kwargs, f, indent=4)
 
     print(f"Initializing {args.num_envs} parallel environments with {args.n_pendulums} pendulums...")
@@ -153,7 +163,7 @@ def main():
     checkpoint_callback = KeepLatestCheckpointsCallback(
         save_freq=max(100_000 // args.num_envs, 1),
         save_path=args.log_dir,
-        name_prefix=f'ppo_npendulum_{args.n_pendulums}',
+        name_prefix=args.model_type.lower(),
         keep_last=10,
     )
     
@@ -172,9 +182,11 @@ def main():
     new_gamma = old_gamma ** (fully_resolved_kwargs["dt"] / old_dt)
     print(f"New gamma: {new_gamma}")
 
-    print("Creating PPO model...")
-    # Initialize the PPO agent. The algorithm can be changed to SAC, TD3, etc.
-    model = PPO(
+    print(f"Creating {args.model_type} model...")
+    RLClass = {"A2C": A2C, "DDPG": DDPG, "DQN": DQN, "PPO": PPO, "SAC": SAC, "TD3": TD3}[args.model_type]
+    
+    # Initialize the agent.
+    model = RLClass(
         "MlpPolicy",
         vec_env,
         verbose=1,
@@ -189,7 +201,7 @@ def main():
         print("Training interrupted by user. Saving final model...")
     finally:
         # Save the final model
-        final_model_path = os.path.join(args.log_dir, f"ppo_npendulum_{args.n_pendulums}_final")
+        final_model_path = os.path.join(args.log_dir, f"{args.model_type.lower()}_final")
         model.save(final_model_path)
         vec_env.close()
         print(f"Done. Final model saved to {final_model_path}.zip")

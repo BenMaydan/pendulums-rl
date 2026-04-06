@@ -8,7 +8,7 @@ import os
 import glob
 import json
 
-from stable_baselines3 import PPO
+from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
 # Import the custom Gymnasium environment
 from env.n_pendulums_env import NPendulumEnv
 
@@ -97,22 +97,17 @@ def main():
                 print(f"No .zip models found in {args.model_path}")
                 
         if model_file and os.path.isfile(model_file):
-            ai_mode = True
-            print(f"Loading model from {model_file}...")
-            model = PPO.load(model_file)
-            # Infer n_pendulums from the model's expected observation space
-            # shape is (2 * n_pendulums + 1,)
-            n_pend = (model.observation_space.shape[0] - 1) // 2
-            print(f"Inferred n_pendulums = {n_pend} from model")
-            
-            # Check for env_config.json in the same directory
+            # Check for train_config.json in the same directory
             model_dir = os.path.dirname(os.path.abspath(model_file))
-            config_path = os.path.join(model_dir, "env_config.json")
+            config_path = os.path.join(model_dir, "train_config.json")
+            model_type = "PPO"
             if os.path.exists(config_path):
                 print(f"Loading environment config from {config_path}...")
                 with open(config_path, "r") as f:
                     loaded_config = json.load(f)
+                    model_type = loaded_config.get("model_type", "PPO")
                     env_kwargs.update(loaded_config)
+                    env_kwargs.pop("model_type", None)
                     if "target_configs" in env_kwargs:
                         env_kwargs["target_configs"] = [np.array(t) for t in env_kwargs["target_configs"]]
                     if "n_pendulums" in env_kwargs:
@@ -120,10 +115,15 @@ def main():
             else:
                 env_kwargs["n_pendulums"] = n_pend
 
+            ai_mode = True
+            print(f"Loading {model_type} model from {model_file}...")
+            RLClass = {"A2C": A2C, "DDPG": DDPG, "DQN": DQN, "PPO": PPO, "SAC": SAC, "TD3": TD3}.get(model_type, PPO)
+            model = RLClass.load(model_file)
+
     # Initialize the actual Gym Environment
     env = NPendulumEnv(**env_kwargs)
+    env.set_init_noise(0.05, np.pi)
     env.reset()
-    env.set_init_noise(0.05, 0)
 
     if not ai_mode:
         env.set_eval()
