@@ -141,30 +141,6 @@ def main():
     fully_resolved_kwargs = temp_env.get_env_kwargs()
     temp_env.close()
 
-    # # Compute dynamic kwargs
-    # densities = {
-    #     'aluminum': 2700.0,
-    #     'steel': 7850.0,
-    #     'brass': 8500.0,
-    #     'copper': 8960.0,
-    #     'titanium': 4500.0,
-    #     'tungsten': 19300.0,
-    # }
-    # masses = compute_masses(
-    #     temp_env,
-    #     cross_sectional_area=np.pi * inches_to_meters(1.0) ** 2,
-    #     density=densities['aluminum']
-    # )
-    # print(f"Computed Masses: {masses}")
-    # env_kwargs["masses"] = list(masses)
-
-
-    # # WE COMPUTED DYNAMIC KWARGS, SO WE NEED TO RE-RESOLVE THE KWARGS
-    # temp_env = NPendulumEnv(**env_kwargs)
-    # fully_resolved_kwargs = temp_env.get_env_kwargs()
-    # temp_env.close()
-
-
     with open(os.path.join(args.log_dir, "env_config.json"), "w") as f:
         json.dump(fully_resolved_kwargs, f, indent=4)
 
@@ -190,13 +166,20 @@ def main():
     
     callback_list = CallbackList([checkpoint_callback, curriculum_callback, tensorboard_callback])
 
+    # Scale gamma appropriately so the change in dt doesn't mess up anything
+    old_gamma = 0.99
+    old_dt = 0.02
+    new_gamma = old_gamma ** (fully_resolved_kwargs["dt"] / old_dt)
+    print(f"New gamma: {new_gamma}")
+
     print("Creating PPO model...")
     # Initialize the PPO agent. The algorithm can be changed to SAC, TD3, etc.
     model = PPO(
         "MlpPolicy",
         vec_env,
         verbose=1,
-        tensorboard_log=os.path.join(args.log_dir, "tensorboard")
+        tensorboard_log=os.path.join(args.log_dir, "tensorboard"),
+        gamma=new_gamma,
     )
 
     print("Starting training...")

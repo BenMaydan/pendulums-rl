@@ -340,7 +340,7 @@ class NPendulumEnv(gym.Env):
         multiplier = 1.0 + (self.reward_weight_vel * reward_vel) + (self.reward_weight_cart * reward_cart)
         max_multiplier = 1.0 + self.reward_weight_vel + self.reward_weight_cart
         
-        total_reward = (reward_angle * multiplier) / max_multiplier
+        total_reward = (reward_angle * multiplier) / max_multiplier * self.dt
         
         # Check early termination if allowed (falling beyond ~90 degrees)
         terminated = False
