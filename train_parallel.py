@@ -119,6 +119,7 @@ def main():
     # Define environment parameters
     env_kwargs = {
         "n_pendulums": args.n_pendulums,
+        "dt": 0.01,
         "viscous_friction": 0.05,
         "pole_length": 5.0,
         "masses": 2.0,

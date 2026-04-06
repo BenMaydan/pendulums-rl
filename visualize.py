@@ -14,8 +14,6 @@ from env.n_pendulums_env import NPendulumEnv
 
 # --- Constants & Setup ---
 WIDTH, HEIGHT = 800, 600
-# Set FPS to 50 to match the environment's internal dt = 0.02s
-FPS = 50 
 CART_WIDTH, CART_HEIGHT = 80, 40
 CART_Y = HEIGHT // 2
 
@@ -76,6 +74,7 @@ def main():
     n_pend = args.n_pendulums
     env_kwargs = {
         "n_pendulums": n_pend,
+        "dt": 0.01,
         "viscous_friction": 0.05,
         "pole_length": 5.0,
         "masses": 2.0,
@@ -131,6 +130,11 @@ def main():
     
     ppm = TRACK_WIDTH_PX / env.pole_length
 
+    # Decouple physics framerate from rendering framerate
+    target_fps = 60
+    physics_steps_per_frame = max(1, int(round((1.0 / target_fps) / env.dt)))
+    fps = int(1.0 / (env.dt * physics_steps_per_frame))
+
     dragging_cart = False
     mouse_pixel_x = WIDTH // 2
     applied_force = 0.0
@@ -145,7 +149,7 @@ def main():
 
     running = True
     while running:
-        clock.tick(FPS)
+        clock.tick(fps)
 
         # --- Event Handling ---
         for event in pygame.event.get():
@@ -175,51 +179,53 @@ def main():
                 if dragging_cart:
                     mouse_pixel_x = event.pos[0]
 
-        # --- Force Calculation & Physics Step ---
-        cart_x = env.state[0]
-        cart_v = env.state[env.N + 1]
+        # --- Force Calculation & Physics Step (Multiple Times for Real-Time) ---
+        for _ in range(physics_steps_per_frame):
+            cart_x = env.state[0]
+            cart_v = env.state[env.N + 1]
 
-        if dragging_cart:
-            # Instead of manually setting position, use a PD Controller 
-            # to calculate the force needed to move the cart to the mouse.
-            target_physical_x = pixel_to_physical_x(mouse_pixel_x, ppm)
-            
-            # Allow dragging slightly past limits to feel the spring
-            limit = env.pole_length / 2.0
-            target_physical_x = max(-limit - 0.5, min(limit + 0.5, target_physical_x))
-            
-            kp = 300.0  # Proportional gain (pull strength)
-            kd = 30.0   # Derivative gain (dampening)
-            
-            applied_force = kp * (target_physical_x - cart_x) - kd * cart_v
-            
-            # Clip physical force bounds, but NOT action spaces here
-            applied_force = np.clip(applied_force, -env.max_force, env.max_force)
-            
-        elif ai_mode:
-            if model is not None:
-                # Use the trained SB3 policy to predict the action
-                action, _states = model.predict(env._get_obs(), deterministic=True)
-                # Output from SB3 is now in normalized units [-1.0, 1.0], scale to physical representation for visuals
-                applied_force = float(action[0]) * env.max_force
+            if dragging_cart:
+                # Instead of manually setting position, use a PD Controller 
+                # to calculate the force needed to move the cart to the mouse.
+                target_physical_x = pixel_to_physical_x(mouse_pixel_x, ppm)
+                
+                # Allow dragging slightly past limits to feel the spring
+                limit = env.pole_length / 2.0
+                target_physical_x = max(-limit - 0.5, min(limit + 0.5, target_physical_x))
+                
+                kp = 300.0  # Proportional gain (pull strength)
+                kd = 30.0   # Derivative gain (dampening)
+                
+                applied_force = kp * (target_physical_x - cart_x) - kd * cart_v
+                
+                # Clip physical force bounds, but NOT action spaces here
+                applied_force = np.clip(applied_force, -env.max_force, env.max_force)
+                
+            elif ai_mode:
+                if model is not None:
+                    # Use the trained SB3 policy to predict the action
+                    action, _states = model.predict(env._get_obs(), deterministic=True)
+                    # Output from SB3 is now in normalized units [-1.0, 1.0], scale to physical representation for visuals
+                    applied_force = float(action[0]) * env.max_force
+                else:
+                    # Fallback if no model loaded
+                    applied_force = 40.0 * math.sin(time.time() * 4.0)
             else:
-                # Fallback if no model loaded
-                applied_force = 40.0 * math.sin(time.time() * 4.0)
-        else:
-            applied_force = 0.0
+                applied_force = 0.0
 
-        # Step the actual environment
-        # Mathematically re-compress action to [-1.0, 1.0] expected by our normalized environments
-        normalized_action_step = applied_force / env.max_force
-        action = np.array([normalized_action_step], dtype=np.float32)
-        
-        # Capture the extra truncated param manually if we want Visualizer to bounce bounds like train process
-        _, _, terminated, truncated, _ = env.step(action)
+            # Step the actual environment
+            # Mathematically re-compress action to [-1.0, 1.0] expected by our normalized environments
+            normalized_action_step = applied_force / env.max_force
+            action = np.array([normalized_action_step], dtype=np.float32)
+            
+            # Capture the extra truncated param manually if we want Visualizer to bounce bounds like train process
+            _, _, terminated, truncated, _ = env.step(action)
 
-        # Automatically reset if it goes fundamentally off rails (should rarely happen now with springs)
-        if terminated or truncated:
-            env.reset()
-            dragging_cart = False
+            # Automatically reset if it goes fundamentally off rails (should rarely happen now with springs)
+            if terminated or truncated:
+                env.reset()
+                dragging_cart = False
+                break
 
         # --- Drawing ---
         screen.fill(WHITE)

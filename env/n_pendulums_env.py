@@ -27,6 +27,7 @@ class NPendulumEnv(gym.Env):
                  edge_spring_k=500.0,
                  edge_spring_damp=10.0,
                  max_g=2.0,
+                 max_cart_vel=1.0,
                  reward_weight_angle=0.6,
                  reward_weight_vel=0.3,
                  reward_weight_cart=0.1,
@@ -99,6 +100,7 @@ class NPendulumEnv(gym.Env):
         # Action space: Normalized [-1.0, 1.0]. Scaled to physical force in step()
         # Max force calculated from configurable max_g and total mass
         self.max_g = max_g
+        self.max_cart_vel = max_cart_vel
         total_mass = self.cart_mass + np.sum(self.masses)
         self.max_force = self.max_g * self.g * total_mass
         
@@ -143,6 +145,7 @@ class NPendulumEnv(gym.Env):
             "edge_spring_k": self.edge_spring_k,
             "edge_spring_damp": self.edge_spring_damp,
             "max_g": self.max_g,
+            "max_cart_vel": self.max_cart_vel,
         }
 
     def get_target_config(self):
@@ -281,9 +284,18 @@ class NPendulumEnv(gym.Env):
 
     def step(self, action):
         """Applies the motor force, integrates physics, and calculates rewards."""
-        # Scale the normalized action [-1.0, 1.0] mathematically up to physical forces
+        # Scale the normalized action [-1.0, 1.0] mathematically to target cart velocity
         normalized_action = np.clip(action, self.action_space.low, self.action_space.high)[0]
-        force = normalized_action * self.max_force
+        # force = normalized_action * self.max_force
+        target_vel = normalized_action * self.max_cart_vel
+        
+        # Calculate force needed to reach target velocity in next step using a P-controller
+        current_vel = self.state[self.N+1] if self.state is not None else 0.0
+        desired_accel = (target_vel - current_vel) / self.dt
+        total_mass = self.cart_mass + np.sum(self.masses)
+        desired_force = desired_accel * total_mass
+        
+        force = np.clip(desired_force, -self.max_force, self.max_force)
         
         # Apply RK4 integration
         self.state = self._rk4_step(self.state, force)
