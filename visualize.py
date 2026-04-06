@@ -77,8 +77,12 @@ def main():
     env_kwargs = {
         "n_pendulums": n_pend,
         "viscous_friction": 0.05,
-        "pole_length": 2.5,
-        "edge_spring_k": 500.0
+        "pole_length": 5.0,
+        "masses": 2.0,
+        "lengths": 1.0,
+        "inertias": 0.5,
+        "cart_sigma": 0.48768,
+        "edge_spring_k": 500.0,
     }
     
     ai_mode = False

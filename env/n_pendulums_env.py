@@ -311,11 +311,10 @@ class NPendulumEnv(gym.Env):
         self.ep_max_joint_vel = max(self.ep_max_joint_vel, float(max_vel))
         self.ep_max_cart_pos_perc = max(self.ep_max_cart_pos_perc, float(cart_pos_perc))
 
-        gauss_reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2))                                      # Bell curve for how close we are to target angles [0 to 1]
-        # cos_reward_angle = np.mean((1.0 + np.cos(diff)) / 2.0)                                                       # Continuous cosine reward to provide a gradient everywhere for swing-up
-        # reward_angle = self.config_cos_weight * cos_reward_angle + (1 - self.config_cos_weight) * gauss_reward_angle # Hybrid alpha approach: 50% global guidance, 50% lock-in precision
-        linear_reward_angle = np.mean((np.pi - np.abs(diff)) / np.pi)                                                   # Strong linear reward to provide a massive V-shape gradient everywhere for swing-up
-        reward_angle = self.config_cos_weight * linear_reward_angle + (1 - self.config_cos_weight) * gauss_reward_angle # Hybrid alpha approach: 50% global guidance, 50% lock-in precision
+        # We do a weighted sum of a bell curve and linear reward to discourage dead gradient
+        gauss_reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2))
+        linear_reward_angle = np.mean((np.pi - np.abs(diff)) / np.pi)
+        reward_angle = self.config_cos_weight * linear_reward_angle + (1 - self.config_cos_weight) * gauss_reward_angle
 
         reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2)) # Bell curve for how close the cart is to the center [0 to 1]
 
