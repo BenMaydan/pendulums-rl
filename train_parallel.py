@@ -192,7 +192,7 @@ def main():
     )
     
     curriculum_callback = CurriculumCallback(
-        flat_phase_steps=1_000_000,
+        flat_phase_steps=2_000_000,
         ramp_phase_steps=98_000_000
     )
     

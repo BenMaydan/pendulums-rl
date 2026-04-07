@@ -358,7 +358,7 @@ class NPendulumEnv(gym.Env):
         terminated = False
         early_termination_allowed = self.early_termination_cart_pos_allowed or self.early_termination_angle_allowed or self.early_termination_angle_vel_allowed
         if early_termination_allowed and not self.eval_mode:
-            if self.early_termination_cart_pos_allowed and abs(x) > (self.pole_length / 2.0) * 0.8:
+            if self.early_termination_cart_pos_allowed and abs(x) > (self.pole_length / 2.0) * 0.9:
                 terminated = True
             if self.early_termination_angle_allowed and np.any(np.abs(diff) > np.pi / 4.0):
                 terminated = True
