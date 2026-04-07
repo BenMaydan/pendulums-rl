@@ -19,14 +19,18 @@ class CurriculumCallback(BaseCallback):
     def __init__(self, start_noise: float = 0.05, max_noise: float = np.pi / 4.0, 
                  flat_phase_steps: int = 1_000_000, 
                  ramp_phase_steps: int = 98_000_000, 
+                 start_gravity: float = 1.0, max_gravity: float = 9.81,
                  verbose: int = 0):
         super().__init__(verbose)
         self.start_noise = start_noise
         self.max_noise = max_noise
         self.flat_phase_steps = flat_phase_steps
         self.ramp_phase_steps = ramp_phase_steps
+        self.start_gravity = start_gravity
+        self.max_gravity = max_gravity
         self.last_noise = None
         self.last_offset = None
+        self.last_gravity = None
         self.last_early_term = None
 
     def _on_step(self) -> bool:
@@ -40,21 +44,28 @@ class CurriculumCallback(BaseCallback):
         if self.num_timesteps <= ramp_start:
             current_noise = self.start_noise
             current_offset = 0.0
+            current_gravity = self.max_gravity
             early_term = True
         elif self.num_timesteps >= ramp_end:
             current_noise = self.max_noise
             current_offset = np.pi
+            current_gravity = self.max_gravity
             early_term = False
         else:
             fraction = (self.num_timesteps - ramp_start) / self.ramp_phase_steps
             current_noise = fraction * self.max_noise
             current_offset = np.pi
+            current_gravity = self.start_gravity + fraction * (self.max_gravity - self.start_gravity)
             early_term = False
             
         if self.last_noise != current_noise or self.last_offset != current_offset:
             self.training_env.env_method("set_init_noise", current_noise, current_offset)
             self.last_noise = current_noise
             self.last_offset = current_offset
+            
+        if self.last_gravity != current_gravity:
+            self.training_env.env_method("set_gravity", current_gravity)
+            self.last_gravity = current_gravity
             
         if self.last_early_term != early_term:
             self.training_env.env_method("set_early_termination", "angle", early_term)
@@ -82,6 +93,7 @@ class TensorboardLoggingCallback(BaseCallback):
                     if "init_noise" in info:
                         self.logger.record("episode_metrics/init_noise", info["init_noise"])
                         self.logger.record("episode_metrics/init_offset", info["init_offset"])
+                        self.logger.record("episode_metrics/gravity", info.get("gravity", 9.81))
         
         if len(self.termination_history) > 0:
             self.logger.record("episode_metrics/termination_rate", sum(self.termination_history) / len(self.termination_history))

@@ -177,6 +177,12 @@ class NPendulumEnv(gym.Env):
         self.current_init_noise = noise
         self.current_init_offset = offset
 
+    def set_gravity(self, g: float):
+        """Updates the gravity constant dynamically for curriculum learning."""
+        self.g = g
+        total_mass = self.cart_mass + np.sum(self.masses)
+        self.max_force = self.max_g * self.g * total_mass
+
     def set_early_termination(self, type: str, allowed: bool):
         """Enable or disable early termination dynamically."""
         assert type in ["cart_pos", "angle", "angle_vel"]
@@ -374,6 +380,7 @@ class NPendulumEnv(gym.Env):
             "episode_max_cart_pos_perc": self.ep_max_cart_pos_perc,
             "init_noise": self.current_init_noise,
             "init_offset": self.current_init_offset,
+            "gravity": self.g,
             "is_terminated": terminated,
         }
         
