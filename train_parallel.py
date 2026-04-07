@@ -168,7 +168,6 @@ def main():
         "lengths": 1.0,
         "inertias": 0.5,
         "cart_sigma": 0.48768,
-        "edge_spring_k": 500.0,
         "max_cart_vel": 10.0,
         "target_configs": target_configs,
         "early_termination_cart_pos_allowed": True,

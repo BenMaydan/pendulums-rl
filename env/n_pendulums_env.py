@@ -24,8 +24,6 @@ class NPendulumEnv(gym.Env):
                  vel_sigma=1.5,
                  dt=0.02,
                  pole_length=2.4384,
-                 edge_spring_k=500.0,
-                 edge_spring_damp=10.0,
                  max_g=2.0,
                  max_cart_vel=1.0,
                  reward_weight_angle=0.6,
@@ -88,8 +86,6 @@ class NPendulumEnv(gym.Env):
         self.cart_sigma = cart_sigma
         
         self.pole_length = pole_length
-        self.edge_spring_k = edge_spring_k
-        self.edge_spring_damp = edge_spring_damp
         
         self.vel_sigma = vel_sigma
 
@@ -150,8 +146,6 @@ class NPendulumEnv(gym.Env):
             "vel_sigma": self.vel_sigma,
             "dt": self.dt,
             "pole_length": self.pole_length,
-            "edge_spring_k": self.edge_spring_k,
-            "edge_spring_damp": self.edge_spring_damp,
             "max_g": self.max_g,
             "max_cart_vel": self.max_cart_vel,
         }
@@ -251,19 +245,17 @@ class NPendulumEnv(gym.Env):
         # 1. Decoupled Cart Equation
         total_cart_force = action
         
-        # Apply damped spring force if cart goes beyond pole limits
         limit = self.pole_length / 2.0
-        if x < -limit:
-            spring_force = -self.edge_spring_k * (x - (-limit))
-            damping_force = -self.edge_spring_damp * x_dot
-            total_cart_force += (spring_force + damping_force)
-        elif x > limit:
-            spring_force = -self.edge_spring_k * (x - limit)
-            damping_force = -self.edge_spring_damp * x_dot
-            total_cart_force += (spring_force + damping_force)
 
-        # The motor and springs determine the cart acceleration.
-        x_ddot = total_cart_force / self.cart_mass
+        # Hard stop logic for cart acceleration
+        if x <= -limit and x_dot <= 0 and total_cart_force < 0:
+            x_ddot = 0.0
+            x_dot = 0.0
+        elif x >= limit and x_dot >= 0 and total_cart_force > 0:
+            x_ddot = 0.0
+            x_dot = 0.0
+        else:
+            x_ddot = total_cart_force / self.cart_mass
         
         # 2. Pendulum Equations (N x N System)
         M_pend = np.zeros((self.N, self.N))
@@ -318,6 +310,17 @@ class NPendulumEnv(gym.Env):
         # Apply RK4 integration
         self.state = self._rk4_step(self.state, force)
         
+        # Enforce hard stop position and velocity
+        limit = self.pole_length / 2.0
+        if self.state[0] <= -limit:
+            self.state[0] = -limit
+            if self.state[self.N+1] < 0:
+                self.state[self.N+1] = 0.0
+        elif self.state[0] >= limit:
+            self.state[0] = limit
+            if self.state[self.N+1] > 0:
+                self.state[self.N+1] = 0.0
+                
         # Check for numerical instability (NaN, Inf, or extremely large values)
         if not np.all(np.isfinite(self.state)) or np.any(np.abs(self.state) > 1e6):
             self.state = np.zeros_like(self.state)
@@ -364,7 +367,7 @@ class NPendulumEnv(gym.Env):
         terminated = False
         early_termination_allowed = self.early_termination_cart_pos_allowed or self.early_termination_angle_allowed or self.early_termination_angle_vel_allowed
         if early_termination_allowed and not self.eval_mode:
-            if self.early_termination_cart_pos_allowed and abs(x) > (self.pole_length / 2.0) * 0.9:
+            if self.early_termination_cart_pos_allowed and abs(x) > (self.pole_length / 2.0) * 0.95:
                 terminated = True
             if self.early_termination_angle_allowed and np.any(np.abs(diff) > np.pi / 4.0):
                 terminated = True

@@ -40,28 +40,11 @@ def pixel_to_physical_x(pixel_x, ppm):
     # Map pixel coordinates back to physical x [-limit, limit]
     return (pixel_x - (WIDTH / 2)) / ppm
 
-def draw_spring(surface, color, start_pos, end_pos, coils=5, width=10):
-    start_x, start_y = start_pos
-    end_x, end_y = end_pos
-    
-    length = end_x - start_x
-    if length == 0:
-        return
-        
-    points = [(start_x, start_y)]
-    for i in range(1, coils + 1):
-        x = start_x + length * (i / (coils + 1))
-        y = start_y + (width if i % 2 == 1 else -width)
-        points.append((x, y))
-        
-    points.append((end_x, end_y))
-    pygame.draw.lines(surface, color, False, points, 2)
-
-
 def main():
     parser = argparse.ArgumentParser(description="Visualize N-Pendulum")
     parser.add_argument("--model_path", type=str, default="./logs/", help="Path to the trained SB3 model (.zip) or directory")
-    parser.add_argument("--n_pendulums", type=int, default=2, help="Number of pendulums")
+    parser.add_argument("--n_pendulums", "-n", type=int, default=2, help="Number of pendulums")
+    parser.add_argument("--gravity", "-g", type=float, default=9.81, help="The gravity to simulate at.")
     args = parser.parse_args()
 
     pygame.init()
@@ -72,6 +55,7 @@ def main():
 
     model = None
     n_pend = args.n_pendulums
+    gravity = args.gravity
     env_kwargs = {
         "n_pendulums": n_pend,
         "dt": 0.01,
@@ -80,8 +64,7 @@ def main():
         "masses": 2.0,
         "lengths": 1.0,
         "inertias": 0.5,
-        "cart_sigma": 0.48768,
-        "edge_spring_k": 500.0,
+        "cart_sigma": 0.48768
     }
     
     ai_mode = False
@@ -123,6 +106,7 @@ def main():
     # Initialize the actual Gym Environment
     env = NPendulumEnv(**env_kwargs)
     env.set_init_noise(0.05, np.pi)
+    env.set_gravity(gravity)
     env.reset()
 
     if not ai_mode:
@@ -189,9 +173,9 @@ def main():
                 # to calculate the force needed to move the cart to the mouse.
                 target_physical_x = pixel_to_physical_x(mouse_pixel_x, ppm)
                 
-                # Allow dragging slightly past limits to feel the spring
+                # Enforce rigid physical drag limits
                 limit = env.pole_length / 2.0
-                target_physical_x = max(-limit - 0.5, min(limit + 0.5, target_physical_x))
+                target_physical_x = max(-limit, min(limit, target_physical_x))
                 
                 kp = 300.0  # Proportional gain (pull strength)
                 kd = 30.0   # Derivative gain (dampening)
@@ -221,7 +205,7 @@ def main():
             # Capture the extra truncated param manually if we want Visualizer to bounce bounds like train process
             _, _, terminated, truncated, _ = env.step(action)
 
-            # Automatically reset if it goes fundamentally off rails (should rarely happen now with springs)
+            # Automatically reset if it goes fundamentally off rails (should rarely happen now with hard stops)
             if terminated or truncated:
                 env.reset()
                 dragging_cart = False
@@ -235,24 +219,14 @@ def main():
         pole_end = int(WIDTH * 0.95)
         pygame.draw.line(screen, GRAY, (pole_start, CART_Y), (pole_end, CART_Y), 6)
         
-        # Draw Spring Anchors
-        anchor_left = TRACK_START_X - 60
-        anchor_right = TRACK_END_X + 60
-        pygame.draw.line(screen, BLACK, (anchor_left, CART_Y - 20), (anchor_left, CART_Y + 20), 4)
-        pygame.draw.line(screen, BLACK, (anchor_right, CART_Y - 20), (anchor_right, CART_Y + 20), 4)
+        # Draw Hard Stops
+        stop_left = TRACK_START_X - CART_WIDTH//2
+        stop_right = TRACK_END_X + CART_WIDTH//2
+        pygame.draw.line(screen, BLACK, (stop_left, CART_Y - 20), (stop_left, CART_Y + 20), 8)
+        pygame.draw.line(screen, BLACK, (stop_right, CART_Y - 20), (stop_right, CART_Y + 20), 8)
 
         # Draw Cart
         cart_pixel_x = physical_to_pixel_x(env.state[0], ppm)
-        
-        # Left Spring
-        left_rest_x = TRACK_START_X - CART_WIDTH//2
-        left_tip_x = min(left_rest_x, cart_pixel_x - CART_WIDTH//2)
-        draw_spring(screen, BLACK, (anchor_left, CART_Y), (left_tip_x, CART_Y), coils=6)
-
-        # Right Spring
-        right_rest_x = TRACK_END_X + CART_WIDTH//2
-        right_tip_x = max(right_rest_x, cart_pixel_x + CART_WIDTH//2)
-        draw_spring(screen, BLACK, (right_tip_x, CART_Y), (anchor_right, CART_Y), coils=6)
 
         cart_rect = pygame.Rect(cart_pixel_x - CART_WIDTH//2, CART_Y - CART_HEIGHT//2, CART_WIDTH, CART_HEIGHT)
         pygame.draw.rect(screen, BLUE, cart_rect)
