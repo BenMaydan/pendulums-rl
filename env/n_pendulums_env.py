@@ -111,12 +111,15 @@ class NPendulumEnv(gym.Env):
         
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64)
         
-        # Observation space: current angle (N), target angle (N), cos(theta) (N), sin(theta) (N), angular velocity (N), cart position (1)
-        # Shape is (5 * self.N + 1,)
-        high = np.inf * np.ones(5 * self.N + 1, dtype=np.float64)
+        # Observation space: time step t-1 and time step t.
+        # Each step: cart pos (1), cart vel (1), sin(theta) (N), cos(theta) (N), angular vel (N), sin(target) (N), cos(target) (N).
+        # Shape is (2 * (5 * self.N + 2),)
+        obs_size = 5 * self.N + 2
+        high = np.inf * np.ones(2 * obs_size, dtype=np.float64)
         self.observation_space = spaces.Box(low=-high, high=high, dtype=np.float64)
         
         self.state = None
+        self.prev_features = np.zeros(obs_size, dtype=np.float64)
         self.current_step_count = 0
         self.max_steps = int(10.0 / self.dt)
         self.current_target_config = self.target_configs[0] if self.target_configs else np.zeros(self.N)
@@ -185,29 +188,33 @@ class NPendulumEnv(gym.Env):
             case "angle_vel":
                 self.early_termination_angle_vel_allowed = allowed
 
-    def _get_obs(self):
-        """Builds the observation."""
+    def _get_features(self):
+        """Builds the features for a single time step."""
         if self.state is None:
-            return np.zeros(5 * self.N + 1, dtype=np.float64)
+            return np.zeros(5 * self.N + 2, dtype=np.float64)
             
         x = self.state[0]
+        x_dot = self.state[self.N+1]
         theta = self.state[1:self.N+1]
         theta_dot = self.state[self.N+2:]
         
-        target = self.current_target_config
         cos_theta = np.cos(theta)
         sin_theta = np.sin(theta)
+        
+        cos_target = np.cos(self.current_target_config)
+        sin_target = np.sin(self.current_target_config)
         
         # Normalize x position to roughly [-1.0, 1.0] based on the track limits.
         # This keeps the neural network's input stable regardless of physical track size.
         limit = max(self.pole_length / 2.0, 0.001)  # Prevent division by zero
         x_norm = x / limit
         
-        # Bound angles to [-pi, pi] so continuous spins don't explode the state space
-        theta_bounded = (theta + np.pi) % (2 * np.pi) - np.pi
-        target_bounded = (target + np.pi) % (2 * np.pi) - np.pi
-        
-        return np.concatenate((theta_bounded, target_bounded, cos_theta, sin_theta, theta_dot, [x_norm]))
+        return np.concatenate(([x_norm, x_dot], sin_theta, cos_theta, theta_dot, sin_target, cos_target))
+
+    def _get_obs(self):
+        """Builds the observation by concatenating t-1 and t features."""
+        current_features = self._get_features()
+        return np.concatenate((self.prev_features, current_features))
 
     def _precompute_constants(self):
         """Precomputes mass distribution matrices for the RK4 integration."""
@@ -296,18 +303,11 @@ class NPendulumEnv(gym.Env):
 
     def step(self, action):
         """Applies the motor force, integrates physics, and calculates rewards."""
-        # Scale the normalized action [-1.0, 1.0] mathematically to target cart velocity
+        self.prev_features = self._get_features()
+        
+        # Scale the normalized action [-1.0, 1.0] to a physical force
         normalized_action = np.clip(action, self.action_space.low, self.action_space.high)[0]
-        # force = normalized_action * self.max_force
-        target_vel = normalized_action * self.max_cart_vel
-        
-        # Calculate force needed to reach target velocity in next step using a P-controller
-        current_vel = self.state[self.N+1] if self.state is not None else 0.0
-        desired_accel = (target_vel - current_vel) / self.dt
-        total_mass = self.cart_mass + np.sum(self.masses)
-        desired_force = desired_accel * total_mass
-        
-        force = np.clip(desired_force, -self.max_force, self.max_force)
+        force = normalized_action * self.max_force
         
         # Apply RK4 integration
         self.state = self._rk4_step(self.state, force)
@@ -397,6 +397,7 @@ class NPendulumEnv(gym.Env):
         noise = self.np_random.uniform(low=-self.current_init_noise, high=self.current_init_noise, size=(self.N,))
         self.state[1:self.N+1] = (self.current_target_config + self.current_init_offset + noise + np.pi) % (2 * np.pi) - np.pi
         
+        self.prev_features = self._get_features()
         return self._get_obs(), {}
 
     def get_joint_angles(self):
