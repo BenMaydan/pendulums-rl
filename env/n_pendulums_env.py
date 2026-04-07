@@ -31,7 +31,10 @@ class NPendulumEnv(gym.Env):
                  reward_weight_angle=0.6,
                  reward_weight_vel=0.3,
                  reward_weight_cart=0.1,
-                 early_termination_allowed=False):
+                 early_termination_cart_pos_allowed=False,
+                 early_termination_angle_allowed=False,
+                 early_termination_angle_vel_allowed=False,
+    ):
         super(NPendulumEnv, self).__init__()
         
         self.N = n_pendulums
@@ -95,7 +98,9 @@ class NPendulumEnv(gym.Env):
         self.reward_weight_vel = reward_weight_vel
         self.reward_weight_cart = reward_weight_cart
 
-        self.early_termination_allowed = early_termination_allowed
+        self.early_termination_cart_pos_allowed = early_termination_cart_pos_allowed
+        self.early_termination_angle_allowed = early_termination_angle_allowed
+        self.early_termination_angle_vel_allowed = early_termination_angle_vel_allowed
         
         # Action space: Normalized [-1.0, 1.0]. Scaled to physical force in step()
         # Max force calculated from configurable max_g and total mass
@@ -169,9 +174,16 @@ class NPendulumEnv(gym.Env):
         self.current_init_noise = noise
         self.current_init_offset = offset
 
-    def set_early_termination(self, allowed):
+    def set_early_termination(self, type: str, allowed: bool):
         """Enable or disable early termination dynamically."""
-        self.early_termination_allowed = allowed
+        assert type in ["cart_pos", "angle", "angle_vel"]
+        match type:
+            case "cart_pos":
+                self.early_termination_cart_pos_allowed = allowed
+            case "angle":
+                self.early_termination_angle_allowed = allowed
+            case "angle_vel":
+                self.early_termination_angle_vel_allowed = allowed
 
     def _get_obs(self):
         """Builds the observation."""
@@ -344,10 +356,14 @@ class NPendulumEnv(gym.Env):
         
         # Check early termination if allowed (falling beyond ~90 degrees)
         terminated = False
-        if self.early_termination_allowed and not self.eval_mode:
-            if np.any(np.abs(diff) > np.pi / 4.0):
+        early_termination_allowed = self.early_termination_cart_pos_allowed or self.early_termination_angle_allowed or self.early_termination_angle_vel_allowed
+        if early_termination_allowed and not self.eval_mode:
+            if self.early_termination_cart_pos_allowed and abs(x) > (self.pole_length / 2.0) * 0.8:
                 terminated = True
-            if abs(x) > (self.pole_length / 2.0) * 0.8:
+            if self.early_termination_angle_allowed and np.any(np.abs(diff) > np.pi / 4.0):
+                terminated = True
+            vel_limits = np.array([15.0 * (i + 1) for i in range(self.N)])
+            if self.early_termination_angle_vel_allowed and np.any(np.abs(theta_dot) > vel_limits):
                 terminated = True
                 
         truncated = False if self.eval_mode else (self.current_step_count >= self.max_steps)
@@ -358,6 +374,7 @@ class NPendulumEnv(gym.Env):
             "episode_max_cart_pos_perc": self.ep_max_cart_pos_perc,
             "init_noise": self.current_init_noise,
             "init_offset": self.current_init_offset,
+            "is_terminated": terminated,
         }
         
         return self._get_obs(), total_reward, terminated, truncated, info

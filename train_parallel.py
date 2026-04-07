@@ -5,6 +5,7 @@ import numpy as np
 import gymnasium as gym
 import glob
 import json
+from collections import deque
 
 from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
 from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -24,8 +25,15 @@ class CurriculumCallback(BaseCallback):
         self.max_noise = max_noise
         self.flat_phase_steps = flat_phase_steps
         self.ramp_phase_steps = ramp_phase_steps
+        self.last_noise = None
+        self.last_offset = None
+        self.last_early_term = None
 
     def _on_step(self) -> bool:
+        # Check every 1000 steps to alleviate IPC bottleneck
+        if self.num_timesteps % 1000 != 0 and self.num_timesteps > 1:
+            return True
+            
         ramp_start = self.flat_phase_steps
         ramp_end = self.flat_phase_steps + self.ramp_phase_steps
         
@@ -43,20 +51,30 @@ class CurriculumCallback(BaseCallback):
             current_offset = np.pi
             early_term = False
             
-        self.training_env.env_method("set_init_noise", current_noise, current_offset)
-        self.training_env.env_method("set_early_termination", early_term)
+        if self.last_noise != current_noise or self.last_offset != current_offset:
+            self.training_env.env_method("set_init_noise", current_noise, current_offset)
+            self.last_noise = current_noise
+            self.last_offset = current_offset
+            
+        if self.last_early_term != early_term:
+            self.training_env.env_method("set_early_termination", "angle", early_term)
+            self.last_early_term = early_term
             
         return True
 
 class TensorboardLoggingCallback(BaseCallback):
     def __init__(self, verbose=0):
         super().__init__(verbose)
+        self.termination_history = deque(maxlen=100)
         
     def _on_step(self) -> bool:
         infos = self.locals.get("infos", [])
         dones = self.locals.get("dones", [])
         for info, done in zip(infos, dones):
             if done:
+                is_terminated = info.get("is_terminated", False)
+                self.termination_history.append(float(is_terminated))
+                
                 if "episode_max_angle_diff" in info:
                     self.logger.record("episode_metrics/max_angle_diff", info["episode_max_angle_diff"])
                     self.logger.record("episode_metrics/max_joint_vel", info["episode_max_joint_vel"])
@@ -64,6 +82,10 @@ class TensorboardLoggingCallback(BaseCallback):
                     if "init_noise" in info:
                         self.logger.record("episode_metrics/init_noise", info["init_noise"])
                         self.logger.record("episode_metrics/init_offset", info["init_offset"])
+        
+        if len(self.termination_history) > 0:
+            self.logger.record("episode_metrics/termination_rate", sum(self.termination_history) / len(self.termination_history))
+            
         return True
 
 class KeepLatestCheckpointsCallback(CheckpointCallback):
@@ -137,7 +159,9 @@ def main():
         "edge_spring_k": 500.0,
         "max_cart_vel": 10.0,
         "target_configs": target_configs,
-        "early_termination_allowed": True,
+        "early_termination_cart_pos_allowed": True,
+        "early_termination_angle_allowed": False,
+        "early_termination_angle_vel_allowed": True,
     }
 
     # Calculate your starting viscosity based on zeta = 0.45 (highly stable, but controllable)
