@@ -118,6 +118,43 @@ class KeepLatestCheckpointsCallback(CheckpointCallback):
                     pass
         return continue_training
 
+def truncate_tb_logs(tb_log_dir: str, max_step: int):
+    """
+    Truncates all TensorBoard event files in the given directory to only contain events up to `max_step`.
+    This prevents overlapping graphs when training is resumed from a checkpoint and the previous run had progressed further.
+    """
+    try:
+        from tensorboard.backend.event_processing.event_file_loader import EventFileLoader
+        from tensorboard.summary.writer.record_writer import RecordWriter
+    except ImportError:
+        print("TensorBoard could not be imported. Skipping log truncation.")
+        return
+
+    event_files = glob.glob(os.path.join(tb_log_dir, "**", "events.out.tfevents.*"), recursive=True)
+    
+    for event_file in event_files:
+        if event_file.endswith(".temp"): continue
+        
+        filtered_events = []
+        try:
+            for event in EventFileLoader(event_file).Load():
+                if event.step <= max_step:
+                    filtered_events.append(event)
+        except Exception as e:
+            print(f"Warning: Could not read {event_file}: {e}")
+            continue
+            
+        temp_file = event_file + ".temp"
+        try:
+            with open(temp_file, "wb") as f:
+                writer = RecordWriter(f)
+                for event in filtered_events:
+                    writer.write(event.SerializeToString())
+            os.replace(temp_file, event_file)
+            print(f"Truncated {os.path.basename(event_file)} to step {max_step}")
+        except Exception as e:
+            print(f"Warning: Could not write truncated logs to {event_file}: {e}")
+
 def make_env(rank, seed=0, **env_kwargs):
     """
     Utility function for multiprocessed env.
@@ -141,6 +178,7 @@ def main():
     parser.add_argument("--n_pendulums", type=int, default=2, help="Number of pendulums in the environment")
     parser.add_argument("--log_dir", type=str, default="./logs/", help="Directory to save logs and checkpoints")
     parser.add_argument("--model_type", type=str, default="PPO", choices=["A2C", "DDPG", "DQN", "PPO", "SAC", "TD3"], help="RL Algorithm to use")
+    parser.add_argument("--resume_path", type=str, default=None, help="Path to checkpoint model to resume from")
     args = parser.parse_args()
 
     dir_path = os.path.normpath(args.log_dir)
@@ -220,18 +258,37 @@ def main():
     print(f"Creating {args.model_type} model...")
     RLClass = {"A2C": A2C, "DDPG": DDPG, "DQN": DQN, "PPO": PPO, "SAC": SAC, "TD3": TD3}[args.model_type]
     
-    # Initialize the agent.
-    model = RLClass(
-        "MlpPolicy",
-        vec_env,
-        verbose=1,
-        tensorboard_log=os.path.join(args.log_dir, "tensorboard"),
-        gamma=new_gamma,
-    )
+    if args.resume_path:
+        print(f"Resuming model from {args.resume_path}...")
+        model = RLClass.load(
+            args.resume_path,
+            env=vec_env,
+            custom_objects={"gamma": new_gamma},
+            tensorboard_log=os.path.join(args.log_dir, "tensorboard")
+        )
+        
+        # Prevent TensorBoard graph overlaps by truncating old events
+        tb_log_dir = os.path.join(args.log_dir, "tensorboard")
+        if os.path.exists(tb_log_dir):
+            print("Cleaning up old overlapping TensorBoard logs (if any)...")
+            truncate_tb_logs(tb_log_dir, model.num_timesteps)
+    else:
+        # Initialize the agent.
+        model = RLClass(
+            "MlpPolicy",
+            vec_env,
+            verbose=1,
+            tensorboard_log=os.path.join(args.log_dir, "tensorboard"),
+            gamma=new_gamma,
+        )
 
     print("Starting training...")
     try:
-        model.learn(total_timesteps=args.total_timesteps, callback=callback_list)
+        model.learn(
+            total_timesteps=args.total_timesteps, 
+            callback=callback_list,
+            reset_num_timesteps=not args.resume_path
+        )
     except KeyboardInterrupt:
         print("Training interrupted by user. Saving final model...")
     finally:
