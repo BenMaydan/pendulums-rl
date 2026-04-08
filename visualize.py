@@ -43,8 +43,10 @@ def pixel_to_physical_x(pixel_x, ppm):
 def main():
     parser = argparse.ArgumentParser(description="Visualize N-Pendulum")
     parser.add_argument("--model_path", type=str, default="./logs/", help="Path to the trained SB3 model (.zip) or directory")
-    parser.add_argument("--n_pendulums", "-n", type=int, default=2, help="Number of pendulums")
+    parser.add_argument("--n_pendulums", "-p", type=int, default=2, help="Number of pendulums")
     parser.add_argument("--gravity", "-g", type=float, default=9.81, help="The gravity to simulate at.")
+    parser.add_argument("--init_offset", "-o", type=float, default=0, help="The initial angle offset when resetting the pendulums")
+    parser.add_argument("--init_noise", "-n", type=float, default=0.05, help="The initial angle noise when resetting the pendulums")
     args = parser.parse_args()
 
     pygame.init()
@@ -105,7 +107,8 @@ def main():
 
     # Initialize the actual Gym Environment
     env = NPendulumEnv(**env_kwargs)
-    env.set_init_noise(0.05, np.pi)
+    init_noise, init_offset = args.init_noise, args.init_offset
+    env.set_init_noise(init_noise, init_offset)
     env.set_gravity(gravity)
     env.reset()
 

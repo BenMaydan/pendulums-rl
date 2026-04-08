@@ -352,7 +352,9 @@ class NPendulumEnv(gym.Env):
         reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2)) # Bell curve for how close the cart is to the center [0 to 1]
 
         # Bell curve for how close the angular velocities are to 0 [0 to 1]
-        reward_vel = np.exp(-np.sum(theta_dot**2) / (2 * self.vel_sigma**2))
+        # We must scale the allowed vel_sigma with sqrt(g/9.81) because actual velocities naturally scale with sqrt(g).
+        current_vel_sigma = self.vel_sigma * np.sqrt(self.g / 9.81)
+        reward_vel = np.exp(-np.sum(theta_dot**2) / (2 * current_vel_sigma**2))
 
         # The key to avoiding the "Valley of Death" local minimum at the bottom:
         # We make the velocity and cart rewards ACT AS MULTIPLIERS to the angle reward.
@@ -371,7 +373,8 @@ class NPendulumEnv(gym.Env):
                 terminated = True
             if self.early_termination_angle_allowed and np.any(np.abs(diff) > np.pi / 4.0):
                 terminated = True
-            vel_limits = np.array([15.0 * (i + 1) for i in range(self.N)])
+            # Scale velocity limits relative to the 9.81 tuned baseline so the AI isn't prematurely killed at higher gravities
+            vel_limits = np.array([15.0 * np.sqrt(self.g / 9.81) * (i + 1) for i in range(self.N)])
             if self.early_termination_angle_vel_allowed and np.any(np.abs(theta_dot) > vel_limits):
                 terminated = True
                 
