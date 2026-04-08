@@ -20,6 +20,8 @@ class CurriculumCallback(BaseCallback):
                  flat_phase_steps: int = 1_000_000, 
                  ramp_phase_steps: int = 98_000_000, 
                  start_gravity: float = 1.0, max_gravity: float = 9.81,
+                 enable_noise_curriculum: bool = True,
+                 enable_gravity_curriculum: bool = True,
                  verbose: int = 0):
         super().__init__(verbose)
         self.start_noise = start_noise
@@ -28,6 +30,8 @@ class CurriculumCallback(BaseCallback):
         self.ramp_phase_steps = ramp_phase_steps
         self.start_gravity = start_gravity
         self.max_gravity = max_gravity
+        self.enable_noise_curriculum = enable_noise_curriculum
+        self.enable_gravity_curriculum = enable_gravity_curriculum
         self.last_noise = None
         self.last_offset = None
         self.last_gravity = None
@@ -44,7 +48,7 @@ class CurriculumCallback(BaseCallback):
         if self.num_timesteps <= ramp_start:
             current_noise = self.start_noise
             current_offset = 0.0
-            current_gravity = self.max_gravity
+            current_gravity = self.start_gravity if not self.enable_noise_curriculum else self.max_gravity
             early_term = True
         elif self.num_timesteps >= ramp_end:
             current_noise = self.max_noise
@@ -57,6 +61,14 @@ class CurriculumCallback(BaseCallback):
             current_offset = np.pi
             current_gravity = self.start_gravity + fraction * (self.max_gravity - self.start_gravity)
             early_term = False
+            
+        if not self.enable_noise_curriculum:
+            current_noise = self.max_noise
+            current_offset = np.pi
+            early_term = False
+            
+        if not self.enable_gravity_curriculum:
+            current_gravity = self.max_gravity
             
         if self.last_noise != current_noise or self.last_offset != current_offset:
             self.training_env.env_method("set_init_noise", current_noise, current_offset)
@@ -179,6 +191,8 @@ def main():
     parser.add_argument("--log_dir", type=str, default="./logs/", help="Directory to save logs and checkpoints")
     parser.add_argument("--model_type", type=str, default="PPO", choices=["A2C", "DDPG", "DQN", "PPO", "SAC", "TD3"], help="RL Algorithm to use")
     parser.add_argument("--resume_path", type=str, default=None, help="Path to checkpoint model to resume from")
+    parser.add_argument("--disable_noise_curriculum", type=float, nargs="?", const=np.pi/4.0, default=None, help="Disable noise curriculum and use this static max noise value")
+    parser.add_argument("--disable_gravity_curriculum", action="store_true", help="Disable gravity curriculum (constant max gravity)")
     args = parser.parse_args()
 
     dir_path = os.path.normpath(args.log_dir)
@@ -210,7 +224,7 @@ def main():
         "target_configs": target_configs,
         "early_termination_cart_pos_allowed": True,
         "early_termination_angle_allowed": False,
-        "early_termination_angle_vel_allowed": True,
+        "early_termination_angle_vel_allowed": False,
     }
 
     # Calculate your starting viscosity based on zeta = 0.45 (highly stable, but controllable)
@@ -240,10 +254,18 @@ def main():
         keep_last=10,
     )
     
-    curriculum_callback = CurriculumCallback(
-        flat_phase_steps=2_000_000,
-        ramp_phase_steps=98_000_000
-    )
+    cb_kwargs = {
+        "flat_phase_steps": 2_000_000,
+        "ramp_phase_steps": 98_000_000,
+        "enable_gravity_curriculum": not args.disable_gravity_curriculum
+    }
+    if args.disable_noise_curriculum is not None:
+        cb_kwargs["enable_noise_curriculum"] = False
+        cb_kwargs["max_noise"] = args.disable_noise_curriculum
+    else:
+        cb_kwargs["enable_noise_curriculum"] = True
+
+    curriculum_callback = CurriculumCallback(**cb_kwargs)
     
     tensorboard_callback = TensorboardLoggingCallback()
     

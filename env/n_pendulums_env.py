@@ -108,9 +108,9 @@ class NPendulumEnv(gym.Env):
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float64)
         
         # Observation space: time step t-1 and time step t.
-        # Each step: cart pos (1), cart vel (1), sin(theta) (N), cos(theta) (N), angular vel (N), sin(target) (N), cos(target) (N).
-        # Shape is (2 * (5 * self.N + 2),)
-        obs_size = 5 * self.N + 2
+        # Each step: cart pos (1), cart vel (1), sin(theta) (N), cos(theta) (N), angular vel (N), sin(target) (N), cos(target) (N), gravity (1).
+        # Shape is (2 * (5 * self.N + 3),)
+        obs_size = 5 * self.N + 3
         high = np.inf * np.ones(2 * obs_size, dtype=np.float64)
         self.observation_space = spaces.Box(low=-high, high=high, dtype=np.float64)
         
@@ -209,7 +209,17 @@ class NPendulumEnv(gym.Env):
         limit = max(self.pole_length / 2.0, 0.001)  # Prevent division by zero
         x_norm = x / limit
         
-        return np.concatenate(([x_norm, x_dot], sin_theta, cos_theta, theta_dot, sin_target, cos_target))
+        # TODO: decide whether to keep this scaling or not.
+        # Scale velocities to be dynamically invariant to changing gravity.
+        # A pendulum naturally swings sqrt(g) times faster as gravity increases.
+        velocity_scale = np.sqrt(9.81 / max(self.g, 0.001))
+        scaled_x_dot = x_dot * velocity_scale
+        scaled_theta_dot = theta_dot * velocity_scale
+        
+        # We append scaled gravity so the neural network learns a smooth contextual policy
+        g_norm = self.g / 9.81
+        
+        return np.concatenate(([x_norm, scaled_x_dot], sin_theta, cos_theta, scaled_theta_dot, sin_target, cos_target, [g_norm]))
 
     def _get_obs(self):
         """Builds the observation by concatenating t-1 and t features."""
@@ -351,8 +361,11 @@ class NPendulumEnv(gym.Env):
 
         reward_cart = np.exp(-x**2 / (2 * self.cart_sigma**2)) # Bell curve for how close the cart is to the center [0 to 1]
 
-        # Bell curve for how close the angular velocities are to 0 [0 to 1]
-        reward_vel = np.exp(-np.sum(theta_dot**2) / (2 * self.vel_sigma**2))
+        # TODO: decide whether to keep this scaling or not.
+        # Scale velocity to normalize the penalty across all gravity levels
+        velocity_scale = np.sqrt(9.81 / max(self.g, 0.001))
+        scaled_theta_dot = theta_dot * velocity_scale
+        reward_vel = np.exp(-np.sum(scaled_theta_dot**2) / (2 * self.vel_sigma**2))
 
         # The key to avoiding the "Valley of Death" local minimum at the bottom:
         # We make the velocity and cart rewards ACT AS MULTIPLIERS to the angle reward.
@@ -371,9 +384,8 @@ class NPendulumEnv(gym.Env):
                 terminated = True
             if self.early_termination_angle_allowed and np.any(np.abs(diff) > np.pi / 4.0):
                 terminated = True
-            # Scale velocity limits relative to the 9.81 tuned baseline so the AI isn't prematurely killed at higher gravities
-            vel_limits = np.array([15.0 * np.sqrt(self.g / 9.81) * (i + 1) for i in range(self.N)])
-            if self.early_termination_angle_vel_allowed and np.any(np.abs(theta_dot) > vel_limits):
+            vel_limits = np.array([15.0 * (i + 1) for i in range(self.N)])
+            if self.early_termination_angle_vel_allowed and np.any(np.abs(scaled_theta_dot) > vel_limits):
                 terminated = True
                 
         truncated = False if self.eval_mode else (self.current_step_count >= self.max_steps)

@@ -192,11 +192,13 @@ def main():
                 if model is not None:
                     # Use the trained SB3 policy to predict the action
                     action, _states = model.predict(env._get_obs(), deterministic=True)
-                    # Output from SB3 is now in normalized units [-1.0, 1.0], scale to physical representation for visuals
-                    applied_force = float(action[0]) * env.max_force
+                    # Clip the action identically to how the physics environment does it so the text isn't misleading
+                    clipped_action = np.clip(action[0], -1.0, 1.0)
+                    # Output from SB3 is now safely in normalized units [-1.0, 1.0], scale to physical representation for visuals
+                    applied_force = float(clipped_action) * env.max_force
                 else:
                     # Fallback if no model loaded
-                    applied_force = 40.0 * math.sin(time.time() * 4.0)
+                    applied_force = env.max_force * math.sin(time.time() * 4.0)
             else:
                 applied_force = 0.0
 
