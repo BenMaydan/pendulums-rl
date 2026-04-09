@@ -36,28 +36,33 @@ class CurriculumCallback(BaseCallback):
         self.last_offset = None
         self.last_gravity = None
         self.last_early_term = None
+        self.initial_timestep = None
 
     def _on_step(self) -> bool:
+        if self.initial_timestep is None:
+            self.initial_timestep = self.num_timesteps
+
         # Check every 1000 steps to alleviate IPC bottleneck
-        if self.num_timesteps % 1000 != 0 and self.num_timesteps > 1:
+        if self.num_timesteps % 1000 != 0 and (self.num_timesteps - self.initial_timestep) > 1:
             return True
             
+        relative_step = self.num_timesteps - self.initial_timestep
         ramp_start = self.flat_phase_steps
         ramp_end = self.flat_phase_steps + self.ramp_phase_steps
         
-        if self.num_timesteps <= ramp_start:
+        if relative_step <= ramp_start:
             current_noise = self.start_noise
             current_offset = 0.0
             current_gravity = self.start_gravity if not self.enable_noise_curriculum else self.max_gravity
             early_term = True
-        elif self.num_timesteps >= ramp_end:
+        elif relative_step >= ramp_end:
             current_noise = self.max_noise
             current_offset = np.pi
             current_gravity = self.max_gravity
             early_term = False
         else:
-            fraction = (self.num_timesteps - ramp_start) / self.ramp_phase_steps
-            current_noise = fraction * self.max_noise
+            fraction = (relative_step - ramp_start) / self.ramp_phase_steps
+            current_noise = self.start_noise + fraction * (self.max_noise - self.start_noise)
             current_offset = np.pi
             current_gravity = self.start_gravity + fraction * (self.max_gravity - self.start_gravity)
             early_term = False
@@ -193,6 +198,12 @@ def main():
     parser.add_argument("--resume_path", type=str, default=None, help="Path to checkpoint model to resume from")
     parser.add_argument("--disable_noise_curriculum", type=float, nargs="?", const=np.pi/4.0, default=None, help="Disable noise curriculum and use this static max noise value")
     parser.add_argument("--disable_gravity_curriculum", action="store_true", help="Disable gravity curriculum (constant max gravity)")
+    parser.add_argument("--start_noise", type=float, default=0.05, help="Starting noise for the curriculum")
+    parser.add_argument("--max_noise", type=float, default=np.pi/4.0, help="Maximum noise for the curriculum")
+    parser.add_argument("--flat_phase_steps", type=int, default=2_000_000, help="Number of steps to keep noise flat at start_noise")
+    parser.add_argument("--ramp_phase_steps", type=int, default=98_000_000, help="Number of steps to ramp noise up to max_noise")
+    parser.add_argument("--cart_jitter_prob", type=float, default=0.0, help="Probability per step of adding cart jitter force")
+    parser.add_argument("--cart_jitter_force", type=float, default=1.0, help="Magnitude multiplier of cart jitter force")
     args = parser.parse_args()
 
     dir_path = os.path.normpath(args.log_dir)
@@ -225,6 +236,8 @@ def main():
         "early_termination_cart_pos_allowed": True,
         "early_termination_angle_allowed": False,
         "early_termination_angle_vel_allowed": False,
+        "cart_jitter_prob": args.cart_jitter_prob,
+        "cart_jitter_force": args.cart_jitter_force,
     }
 
     # Calculate your starting viscosity based on zeta = 0.45 (highly stable, but controllable)
@@ -255,8 +268,10 @@ def main():
     )
     
     cb_kwargs = {
-        "flat_phase_steps": 2_000_000,
-        "ramp_phase_steps": 98_000_000,
+        "start_noise": args.start_noise,
+        "max_noise": args.max_noise,
+        "flat_phase_steps": args.flat_phase_steps,
+        "ramp_phase_steps": args.ramp_phase_steps,
         "enable_gravity_curriculum": not args.disable_gravity_curriculum
     }
     if args.disable_noise_curriculum is not None:

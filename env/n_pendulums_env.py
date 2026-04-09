@@ -32,6 +32,8 @@ class NPendulumEnv(gym.Env):
                  early_termination_cart_pos_allowed=False,
                  early_termination_angle_allowed=False,
                  early_termination_angle_vel_allowed=False,
+                 cart_jitter_prob=0.0,
+                 cart_jitter_force=0.0,
     ):
         super(NPendulumEnv, self).__init__()
         
@@ -94,6 +96,9 @@ class NPendulumEnv(gym.Env):
         self.reward_weight_vel = reward_weight_vel
         self.reward_weight_cart = reward_weight_cart
 
+        self.cart_jitter_prob = cart_jitter_prob
+        self.cart_jitter_force = cart_jitter_force
+
         self.early_termination_cart_pos_allowed = early_termination_cart_pos_allowed
         self.early_termination_angle_allowed = early_termination_angle_allowed
         self.early_termination_angle_vel_allowed = early_termination_angle_vel_allowed
@@ -148,6 +153,8 @@ class NPendulumEnv(gym.Env):
             "pole_length": self.pole_length,
             "max_g": self.max_g,
             "max_cart_vel": self.max_cart_vel,
+            "cart_jitter_prob": self.cart_jitter_prob,
+            "cart_jitter_force": self.cart_jitter_force,
         }
 
     def get_target_config(self):
@@ -316,6 +323,10 @@ class NPendulumEnv(gym.Env):
         # Scale the normalized action [-1.0, 1.0] to a physical force
         normalized_action = np.clip(action, self.action_space.low, self.action_space.high)[0]
         force = normalized_action * self.max_force
+        
+        if self.cart_jitter_prob > 0.0 and self.np_random.random() < self.cart_jitter_prob:
+            jitter = self.np_random.uniform(-self.cart_jitter_force, self.cart_jitter_force)
+            force += jitter * self.max_force
         
         # Apply RK4 integration
         self.state = self._rk4_step(self.state, force)
