@@ -47,6 +47,8 @@ def main():
     parser.add_argument("--gravity", "-g", type=float, default=9.81, help="The gravity to simulate at.")
     parser.add_argument("--init_offset", "-o", type=float, default=0, help="The initial angle offset when resetting the pendulums")
     parser.add_argument("--init_noise", "-n", type=float, default=0.05, help="The initial angle noise when resetting the pendulums")
+    parser.add_argument("--jitter_prob", type=float, default=None, help="Probability of cart jitter (overrides config)")
+    parser.add_argument("--jitter_force", type=float, default=None, help="Force multiplier for cart jitter (overrides config)")
     args = parser.parse_args()
 
     pygame.init()
@@ -104,6 +106,12 @@ def main():
             print(f"Loading {model_type} model from {model_file}...")
             RLClass = {"A2C": A2C, "DDPG": DDPG, "DQN": DQN, "PPO": PPO, "SAC": SAC, "TD3": TD3}.get(model_type, PPO)
             model = RLClass.load(model_file)
+
+    # Apply manual CLI overrides to env properties
+    if args.jitter_prob is not None:
+        env_kwargs["cart_jitter_prob"] = args.jitter_prob
+    if args.jitter_force is not None:
+        env_kwargs["cart_jitter_force"] = args.jitter_force
 
     # Initialize the actual Gym Environment
     env = NPendulumEnv(**env_kwargs)

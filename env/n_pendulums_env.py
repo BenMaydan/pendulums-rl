@@ -365,6 +365,10 @@ class NPendulumEnv(gym.Env):
         self.ep_max_joint_vel = max(self.ep_max_joint_vel, float(max_vel))
         self.ep_max_cart_pos_perc = max(self.ep_max_cart_pos_perc, float(cart_pos_perc))
 
+        # Explicit success bounds (e.g. angle within ~11.5 deg, velocity under 1.0 rad/s)
+        if max_diff < 0.2 and max_vel < 1.0:
+            self.ep_success = True
+
         # We do a weighted sum of a bell curve and linear reward to discourage dead gradient
         gauss_reward_angle = np.exp(-np.sum(diff**2) / (2 * self.config_sigma**2))
         linear_reward_angle = np.mean((np.pi - np.abs(diff)) / np.pi)
@@ -409,6 +413,7 @@ class NPendulumEnv(gym.Env):
             "init_offset": self.current_init_offset,
             "gravity": self.g,
             "is_terminated": terminated,
+            "is_success": self.ep_success,
         }
         
         return self._get_obs(), total_reward, terminated, truncated, info
@@ -427,6 +432,7 @@ class NPendulumEnv(gym.Env):
         self.ep_max_angle_diff = 0.0
         self.ep_max_joint_vel = 0.0
         self.ep_max_cart_pos_perc = 0.0
+        self.ep_success = False
         
         noise = self.np_random.uniform(low=-self.current_init_noise, high=self.current_init_noise, size=(self.N,))
         self.state[1:self.N+1] = (self.current_target_config + self.current_init_offset + noise + np.pi) % (2 * np.pi) - np.pi

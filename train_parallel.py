@@ -98,6 +98,7 @@ class TensorboardLoggingCallback(BaseCallback):
     def __init__(self, verbose=0):
         super().__init__(verbose)
         self.termination_history = deque(maxlen=100)
+        self.success_history = deque(maxlen=100)
         
     def _on_step(self) -> bool:
         infos = self.locals.get("infos", [])
@@ -106,6 +107,9 @@ class TensorboardLoggingCallback(BaseCallback):
             if done:
                 is_terminated = info.get("is_terminated", False)
                 self.termination_history.append(float(is_terminated))
+                
+                is_success = info.get("is_success", False)
+                self.success_history.append(float(is_success))
                 
                 if "episode_max_angle_diff" in info:
                     self.logger.record("episode_metrics/max_angle_diff", info["episode_max_angle_diff"])
@@ -117,7 +121,12 @@ class TensorboardLoggingCallback(BaseCallback):
                         self.logger.record("episode_metrics/gravity", info.get("gravity", 9.81))
         
         if len(self.termination_history) > 0:
-            self.logger.record("episode_metrics/termination_rate", sum(self.termination_history) / len(self.termination_history))
+            termination_rate = sum(self.termination_history) / len(self.termination_history)
+            self.logger.record("episode_metrics/termination_rate", termination_rate)
+            
+        if len(self.success_history) > 0:
+            success_rate = sum(self.success_history) / len(self.success_history)
+            self.logger.record("episode_metrics/success_rate", success_rate)
             
         return True
 
