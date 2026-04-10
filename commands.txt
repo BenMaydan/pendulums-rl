@@ -1,1 +1,21 @@
+
+TRAINING:
+
+JITTER AFTER BASELINE:
 python train_parallel.py --resume_path logs/ppo_curriculum/ppo_200000000_steps.zip --log_dir logs/jitter --total_timesteps 20000000 --flat_phase_steps 20000000 --start_noise 0.1 --max_noise 0.1 --start_offset 3.14 --cart_jitter_prob 0.05 --cart_jitter_force 0.3
+
+NOISE AFTER BASELINE:
+python train_parallel.py --resume_path logs/ppo_curriculum/ppo_200000000_steps.zip --log_dir logs/noise --total_timesteps 100000000 --flat_phase_steps 0 --ramp_phase_steps 100000000 --start_offset 3.14159 --start_noise 0.1 --max_noise 0.785398 --cart_jitter_prob 0.0 --cart_jitter_force 0.0 --disable_gravity_curriculum
+
+
+
+VISUALIZATION:
+
+BASELINE:
+python visualize.py --model_path logs/ppo_baseline_final.zip -g 9.81 -o 3.14 -n 0.2
+
+JITTER:
+python visualize.py --model_path logs/ppo_jitter/ppo_2 -g 9.81 -o 3.14 -n 0.2 --jitter_prob 0.1 --jitter_force 0.5
+
+NOISE:
+python visualize.py --model_path logs/ppo_noise/ppo_ -g 9.81 -o 3.14 -n 0.2

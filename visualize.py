@@ -142,6 +142,22 @@ def main():
         button_height
     )
 
+    term_button_rect = pygame.Rect(
+        WIDTH - button_width - 20, 
+        HEIGHT - (button_height * 2) - 30, 
+        button_width, 
+        button_height
+    )
+    
+    reset_button_rect = pygame.Rect(
+        WIDTH - button_width - 20, 
+        HEIGHT - (button_height * 3) - 40, 
+        button_width, 
+        button_height
+    )
+    
+    early_term = env.early_termination_angle_allowed or env.early_termination_cart_pos_allowed or env.early_termination_angle_vel_allowed
+
     running = True
     while running:
         clock.tick(fps)
@@ -157,6 +173,24 @@ def main():
                 # Toggle AI Mode
                 if button_rect.collidepoint(mouse_x, mouse_y):
                     ai_mode = not ai_mode
+                
+                # Toggle Early Termination
+                if term_button_rect.collidepoint(mouse_x, mouse_y):
+                    early_term = not early_term
+                    env.set_early_termination("cart_pos", early_term)
+                    env.set_early_termination("angle", early_term)
+                    env.set_early_termination("angle_vel", early_term)
+                    # For early termination to work, we need to ensure eval_mode is False
+                    if early_term:
+                        env.set_train()
+                    elif not ai_mode:
+                        env.set_eval()
+                
+                # Immediate Reset
+                if reset_button_rect.collidepoint(mouse_x, mouse_y):
+                    env.reset()
+                    dragging_cart = False
+                    applied_force = 0.0
                 
                 # Check if clicking on the cart
                 cart_px = physical_to_pixel_x(env.state[0], ppm)
@@ -271,6 +305,25 @@ def main():
         text_surf = font.render(btn_text, True, BLACK)
         text_rect = text_surf.get_rect(center=button_rect.center)
         screen.blit(text_surf, text_rect)
+
+        # Draw Term Button
+        term_color = GREEN if early_term else GRAY
+        pygame.draw.rect(screen, term_color, term_button_rect)
+        pygame.draw.rect(screen, BLACK, term_button_rect, 2)
+
+        term_text = "Term: ON" if early_term else "Term: OFF"
+        term_surf = font.render(term_text, True, BLACK)
+        term_rect = term_surf.get_rect(center=term_button_rect.center)
+        screen.blit(term_surf, term_rect)
+
+        # Draw Reset Button
+        pygame.draw.rect(screen, RED, reset_button_rect)
+        pygame.draw.rect(screen, BLACK, reset_button_rect, 2)
+
+        reset_text = "Reset"
+        reset_surf = font.render(reset_text, True, WHITE)
+        reset_rect = reset_surf.get_rect(center=reset_button_rect.center)
+        screen.blit(reset_surf, reset_rect)
 
         # Draw Status Texts
         status_text = f"Mode: {'AI' if ai_mode else 'Manual'} | Cart Pos: {env.state[0]:.3f} m"
