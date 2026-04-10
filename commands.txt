@@ -1,0 +1,1 @@
+python train_parallel.py --resume_path logs/ppo_curriculum/ppo_200000000_steps.zip --log_dir logs/jitter --total_timesteps 20000000 --flat_phase_steps 20000000 --start_noise 0.1 --max_noise 0.1 --start_offset 3.14 --cart_jitter_prob 0.05 --cart_jitter_force 0.3

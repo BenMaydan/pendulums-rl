@@ -17,6 +17,7 @@ from env.physics_utils import inches_to_meters, compute_masses, compute_max_visc
 
 class CurriculumCallback(BaseCallback):
     def __init__(self, start_noise: float = 0.05, max_noise: float = np.pi / 4.0, 
+                 start_offset: float = 0.0,
                  flat_phase_steps: int = 1_000_000, 
                  ramp_phase_steps: int = 98_000_000, 
                  start_gravity: float = 1.0, max_gravity: float = 9.81,
@@ -26,6 +27,7 @@ class CurriculumCallback(BaseCallback):
         super().__init__(verbose)
         self.start_noise = start_noise
         self.max_noise = max_noise
+        self.start_offset = start_offset
         self.flat_phase_steps = flat_phase_steps
         self.ramp_phase_steps = ramp_phase_steps
         self.start_gravity = start_gravity
@@ -52,9 +54,11 @@ class CurriculumCallback(BaseCallback):
         
         if relative_step <= ramp_start:
             current_noise = self.start_noise
-            current_offset = 0.0
+            current_offset = self.start_offset
             current_gravity = self.start_gravity if not self.enable_noise_curriculum else self.max_gravity
-            early_term = True
+            # ONLY force early termination if the pendulum actually starts near the top target!
+            # If we start pointing down, angle termination would instantly end the episode on step 1.
+            early_term = True if (current_offset + current_noise) < (np.pi / 4.0) else False
         elif relative_step >= ramp_end:
             current_noise = self.max_noise
             current_offset = np.pi
@@ -63,7 +67,7 @@ class CurriculumCallback(BaseCallback):
         else:
             fraction = (relative_step - ramp_start) / self.ramp_phase_steps
             current_noise = self.start_noise + fraction * (self.max_noise - self.start_noise)
-            current_offset = np.pi
+            current_offset = self.start_offset + fraction * (np.pi - self.start_offset)
             current_gravity = self.start_gravity + fraction * (self.max_gravity - self.start_gravity)
             early_term = False
             
@@ -200,10 +204,14 @@ def main():
     parser.add_argument("--disable_gravity_curriculum", action="store_true", help="Disable gravity curriculum (constant max gravity)")
     parser.add_argument("--start_noise", type=float, default=0.05, help="Starting noise for the curriculum")
     parser.add_argument("--max_noise", type=float, default=np.pi/4.0, help="Maximum noise for the curriculum")
+    parser.add_argument("--start_offset", type=float, default=0.0, help="Starting angle offset for the curriculum")
     parser.add_argument("--flat_phase_steps", type=int, default=2_000_000, help="Number of steps to keep noise flat at start_noise")
     parser.add_argument("--ramp_phase_steps", type=int, default=98_000_000, help="Number of steps to ramp noise up to max_noise")
     parser.add_argument("--cart_jitter_prob", type=float, default=0.0, help="Probability per step of adding cart jitter force")
     parser.add_argument("--cart_jitter_force", type=float, default=1.0, help="Magnitude multiplier of cart jitter force")
+    parser.add_argument("--early_term_cart_pos", action=argparse.BooleanOptionalAction, default=True, help="Enable early termination on cart position limits")
+    parser.add_argument("--early_term_angle", action=argparse.BooleanOptionalAction, default=False, help="Enable early termination on angle limits (Warning: curriculum overrides this if enabled)")
+    parser.add_argument("--early_term_angle_vel", action=argparse.BooleanOptionalAction, default=False, help="Enable early termination on angular velocity limits")
     args = parser.parse_args()
 
     dir_path = os.path.normpath(args.log_dir)
@@ -233,9 +241,9 @@ def main():
         "cart_sigma": 0.48768,
         "max_cart_vel": 10.0,
         "target_configs": target_configs,
-        "early_termination_cart_pos_allowed": True,
-        "early_termination_angle_allowed": False,
-        "early_termination_angle_vel_allowed": False,
+        "early_termination_cart_pos_allowed": args.early_term_cart_pos,
+        "early_termination_angle_allowed": args.early_term_angle,
+        "early_termination_angle_vel_allowed": args.early_term_angle_vel,
         "cart_jitter_prob": args.cart_jitter_prob,
         "cart_jitter_force": args.cart_jitter_force,
     }
@@ -270,6 +278,7 @@ def main():
     cb_kwargs = {
         "start_noise": args.start_noise,
         "max_noise": args.max_noise,
+        "start_offset": args.start_offset,
         "flat_phase_steps": args.flat_phase_steps,
         "ramp_phase_steps": args.ramp_phase_steps,
         "enable_gravity_curriculum": not args.disable_gravity_curriculum
